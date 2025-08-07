@@ -260,13 +260,10 @@ async function createP24Payment(reservation, amount) {
 async function checkPaymentStatuses() {
   try {
     // Sprawdź czy baza danych jest dostępna
-    if (!pool) {
-      console.log('⚠️ Baza danych niedostępna - pomijam sprawdzanie płatności');
-      return;
-    }
+    const dbPool = await checkDatabaseConnection();
 
     // Znajdź WSZYSTKIE rezerwacje "platnosc_w_toku" (niezależnie od wieku) - DYNAMICZNE SPRAWDZANIE
-    const [paymentInProgressReservations] = await pool.query(`
+    const [paymentInProgressReservations] = await dbPool.query(`
       SELECT id, spot_id, date, end_date, status, created_at, payment_id 
       FROM reservations 
       WHERE status = 'platnosc_w_toku'
@@ -295,7 +292,7 @@ async function checkPaymentStatuses() {
               // Status 1 = udana płatność, Status 0 = oczekująca
               if (paymentData.data && paymentData.data.status === 1) { // 1 = udana płatność
                 // Zmień status na "opłacona"
-                await pool.query(
+                await dbPool.query(
                   'UPDATE reservations SET status = ?, updated_at = NOW() WHERE id = ?',
                   ['opłacona', reservation.id]
                 );
@@ -320,13 +317,13 @@ async function checkPaymentStatuses() {
                 for (const blockDate of blockDates) {
                   try {
                     // Usuń starą blokadę
-                    await pool.query(
+                    await dbPool.query(
                       'DELETE FROM spot_blocks WHERE spot_id = ? AND date = ? AND source = ?',
                       [reservation.spot_id, blockDate, 'reservation']
                     );
                     
                     // Dodaj nową blokadę z source 'paid_reservation'
-                    await pool.query(
+                    await dbPool.query(
                       'INSERT INTO spot_blocks (spot_id, date, source) VALUES (?, ?, ?)',
                       [reservation.spot_id, blockDate, 'paid_reservation']
                     );
@@ -357,13 +354,10 @@ async function checkPaymentStatuses() {
 async function checkAndUpdateReservationStatuses() {
   try {
     // Sprawdź czy baza danych jest dostępna
-    if (!pool) {
-      console.log('⚠️ Baza danych niedostępna - pomijam sprawdzanie statusów rezerwacji');
-      return;
-    }
+    const dbPool = await checkDatabaseConnection();
 
     // KROK 1: Znajdź rezerwacje "oczekująca" starsze niż 900 sekund (dokładnie 15 minut)
-    const [expiredReservations] = await pool.query(`
+    const [expiredReservations] = await dbPool.query(`
       SELECT id, spot_id, date, end_date, status, created_at, payment_id,
              TIMESTAMPDIFF(SECOND, created_at, NOW()) as seconds_old
       FROM reservations 
@@ -384,7 +378,7 @@ async function checkAndUpdateReservationStatuses() {
         }
         
         // Zmień status na odpowiedni
-        await pool.query(
+        await dbPool.query(
           'UPDATE reservations SET status = ?, updated_at = NOW() WHERE id = ?',
           [newStatus, reservation.id]
         );
@@ -409,7 +403,7 @@ async function checkAndUpdateReservationStatuses() {
           // Usuń tylko blokady z source 'reservation' z bazy danych
           for (const blockDate of blockDates) {
             try {
-              await pool.query(
+              await dbPool.query(
                 'DELETE FROM spot_blocks WHERE spot_id = ? AND date = ? AND source = ?',
                 [reservation.spot_id, blockDate, 'reservation']
               );
@@ -425,7 +419,7 @@ async function checkAndUpdateReservationStatuses() {
     }
     
     // KROK 2: Sprawdź rezerwacje "platnosc_w_toku" starsze niż 310 sekund od zmiany statusu (dokładnie 5 minut i 10 sekund)
-    const [paymentInProgressExpired] = await pool.query(`
+    const [paymentInProgressExpired] = await dbPool.query(`
       SELECT id, spot_id, date, end_date, status, created_at, updated_at, payment_id,
              TIMESTAMPDIFF(SECOND, updated_at, NOW()) as seconds_old
       FROM reservations 
@@ -458,7 +452,7 @@ async function checkAndUpdateReservationStatuses() {
         paymentStatus = 'nieoplacona';
         
         // Zmień status na finalny status
-        await pool.query(
+        await dbPool.query(
           'UPDATE reservations SET status = ?, updated_at = NOW() WHERE id = ?',
           [paymentStatus, reservation.id]
         );
@@ -483,7 +477,7 @@ async function checkAndUpdateReservationStatuses() {
           // Usuń tylko blokady z source 'reservation' z bazy danych
           for (const blockDate of blockDates) {
             try {
-              await pool.query(
+              await dbPool.query(
                 'DELETE FROM spot_blocks WHERE spot_id = ? AND date = ? AND source = ?',
                 [reservation.spot_id, blockDate, 'reservation']
               );
@@ -1125,19 +1119,34 @@ console.log('NODE_ENV:', process.env.NODE_ENV);
 
 let pool;
 
-try {
-  pool = mysql.createPool({
-    host: process.env.DB_HOST || 'localhost',
-    user: process.env.DB_USER || 'root',
-    password: process.env.DB_PASSWORD || 'Jankopernik1',
-    database: process.env.DB_NAME || 'fishing',
-    waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0,
-    timezone: '+02:00' // Ustaw timezone na polską strefę czasową (CEST)
-  });
+// Funkcja do tworzenia puli połączeń z lepszą obsługą błędów
+function createDatabasePool() {
+  try {
+    return mysql.createPool({
+      host: process.env.DB_HOST || 'localhost',
+      user: process.env.DB_USER || 'root',
+      password: process.env.DB_PASSWORD || 'Jankopernik1',
+      database: process.env.DB_NAME || 'fishing',
+      waitForConnections: true,
+      connectionLimit: 10,
+      queueLimit: 0,
+      timezone: '+02:00', // Ustaw timezone na polską strefę czasową (CEST)
+      acquireTimeout: 60000, // 60 sekund na uzyskanie połączenia
+      timeout: 60000, // 60 sekund timeout na zapytania
+      reconnect: true, // Automatyczne reconnect
+      charset: 'utf8mb4'
+    });
+  } catch (error) {
+    console.error('❌ Błąd podczas tworzenia puli połączeń:', error.message);
+    return null;
+  }
+}
 
-  // Test połączenia z bazą danych (nie blokuj uruchamiania serwera)
+// Inicjalizacja puli
+pool = createDatabasePool();
+
+// Test połączenia z bazą danych (nie blokuj uruchamiania serwera)
+if (pool) {
   pool.getConnection((err, connection) => {
     if (err) {
       console.error('❌ Błąd połączenia z bazą danych:', err.message);
@@ -1148,27 +1157,57 @@ try {
       connection.release();
     }
   });
-} catch (error) {
-  console.error('❌ Błąd podczas tworzenia puli połączeń:', error.message);
+} else {
+  console.error('❌ Nie udało się utworzyć puli połączeń');
   console.error('   Serwer uruchomi się bez bazy danych - niektóre funkcje mogą nie działać');
-  pool = null;
 }
 
-// Funkcja pomocnicza do sprawdzania dostępności bazy danych
-function checkDatabaseConnection() {
+// Funkcja pomocnicza do sprawdzania dostępności bazy danych z retry logic
+async function checkDatabaseConnection() {
   if (!pool) {
     throw new Error('Baza danych niedostępna');
   }
-  return pool;
+  
+  // Sprawdź czy połączenie jest aktywne
+  try {
+    const connection = await pool.getConnection();
+    connection.release();
+    return pool;
+  } catch (error) {
+    console.error('❌ Błąd połączenia z bazą danych:', error.message);
+    
+    // Jeśli to błąd ECONNRESET, spróbuj ponownie utworzyć pulę
+    if (error.code === 'ECONNRESET' || error.code === 'PROTOCOL_CONNECTION_LOST') {
+      console.log('🔄 Próba ponownego połączenia z bazą danych...');
+      pool = createDatabasePool();
+      
+      if (pool) {
+        try {
+          const connection = await pool.getConnection();
+          connection.release();
+          console.log('✅ Ponowne połączenie z bazą danych udane');
+          return pool;
+        } catch (retryError) {
+          console.error('❌ Nie udało się ponownie połączyć z bazą danych:', retryError.message);
+          throw new Error('Baza danych niedostępna po próbie ponownego połączenia');
+        }
+      } else {
+        throw new Error('Nie udało się utworzyć nowej puli połączeń');
+      }
+    }
+    
+    throw error;
+  }
 }
 
 // GET /api/spots – lista wszystkich stanowisk
 app.get('/api/spots', async (req, res) => {
   try {
-    const dbPool = checkDatabaseConnection();
+    const dbPool = await checkDatabaseConnection();
     const [rows] = await dbPool.query('SELECT * FROM spots');
     res.json(rows);
   } catch (err) {
+    console.error('❌ Błąd w /api/spots:', err.message);
     res.status(503).json({ error: err.message });
   }
 });
@@ -1176,10 +1215,11 @@ app.get('/api/spots', async (req, res) => {
 // GET /api/reservations – lista wszystkich rezerwacji
 app.get('/api/reservations', async (req, res) => {
   try {
-    const dbPool = checkDatabaseConnection();
+    const dbPool = await checkDatabaseConnection();
     const [rows] = await dbPool.query('SELECT * FROM reservations ORDER BY created_at DESC');
     res.json(rows);
   } catch (err) {
+    console.error('❌ Błąd w /api/reservations:', err.message);
     res.status(503).json({ error: err.message });
   }
 });
@@ -1190,7 +1230,7 @@ app.get('/api/reservations/token/:token', async (req, res) => {
   console.log('🔍 Endpoint /api/reservations/token/:token wywołany dla tokenu:', token);
   
   try {
-    const dbPool = checkDatabaseConnection();
+    const dbPool = await checkDatabaseConnection();
     const [rows] = await dbPool.query('SELECT * FROM reservations WHERE token = ?', [token]);
     if (rows.length === 0) {
       console.log('❌ Nie znaleziono rezerwacji dla tokenu:', token);
@@ -1234,7 +1274,7 @@ app.get('/api/reservations/token/:token', async (req, res) => {
             
             // Zmień status na "opłacona" (tylko jeśli nie jest już opłacona)
             if (reservation.status !== 'opłacona') {
-              await pool.query('UPDATE reservations SET status = ?, updated_at = NOW() WHERE id = ?', ['opłacona', reservation.id]);
+              await dbPool.query('UPDATE reservations SET status = ?, updated_at = NOW() WHERE id = ?', ['opłacona', reservation.id]);
               
               // Zmień source blokad z 'reservation' na 'paid_reservation' (rezerwacja potwierdzona)
               const startDate = formatDateForDisplay(reservation.date);
@@ -1256,13 +1296,13 @@ app.get('/api/reservations/token/:token', async (req, res) => {
               for (const blockDate of blockDates) {
                 try {
                   // Usuń starą blokadę
-                  await pool.query(
+                  await dbPool.query(
                     'DELETE FROM spot_blocks WHERE spot_id = ? AND date = ? AND source = ?',
                     [reservation.spot_id, blockDate, 'reservation']
                   );
                   
                   // Dodaj nową blokadę z source 'paid_reservation'
-                  await pool.query(
+                  await dbPool.query(
                     'INSERT INTO spot_blocks (spot_id, date, source) VALUES (?, ?, ?)',
                     [reservation.spot_id, blockDate, 'paid_reservation']
                   );
@@ -1276,7 +1316,7 @@ app.get('/api/reservations/token/:token', async (req, res) => {
             }
             
             // Pobierz zaktualizowaną rezerwację
-            const [updatedRows] = await pool.query('SELECT * FROM reservations WHERE id = ?', [reservation.id]);
+            const [updatedRows] = await dbPool.query('SELECT * FROM reservations WHERE id = ?', [reservation.id]);
             console.log('✅ Zwracam zaktualizowaną rezerwację ze statusem "opłacona"');
             return res.json(updatedRows[0]);
           } else {
@@ -1360,7 +1400,8 @@ app.post('/api/reservations', async (req, res) => {
     spot_id, date, start_time, end_date, end_time, amount, captcha_token // <-- dodane captcha_token
   } = req.body;
   
-      // Weryfikacja captcha - TYMCZASOWO WYŁĄCZONA DLA LOCALHOST
+      // Weryfikacja captcha - TYMCZASOWO WYŁĄCZONA
+      // Aby włączyć ponownie, odkomentuj poniższe linie:
     // if (!captcha_token) {
     //   return res.status(400).json({ error: 'Brak tokenu captcha.' });
     // }
@@ -1447,14 +1488,15 @@ app.post('/api/reservations', async (req, res) => {
     console.log('date (przyjazd):', dateFixed);
     console.log('end_date (wyjazd):', endDateFixed);
     
-    const [result] = await pool.query(
+    const dbPool = await checkDatabaseConnection();
+    const [result] = await dbPool.query(
       `INSERT INTO reservations (first_name, last_name, phone, car_plate, email, spot_id, date, start_time, end_date, end_time, status, token, amount)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [first_name, last_name, phone, car_plate, email, spot_id, dateFixed, start_time, endDateFixed, final_end_time, status, token, final_amount]
     );
     
     // Pobierz utworzoną rezerwację do wysłania emaila
-    const [newReservation] = await pool.query('SELECT * FROM reservations WHERE id = ?', [result.insertId]);
+    const [newReservation] = await dbPool.query('SELECT * FROM reservations WHERE id = ?', [result.insertId]);
     
     // DEBUG: Sprawdź co zostało zapisane w bazie
     console.log('🔍 DEBUG REZERWACJA - DANE W BAZIE:');
@@ -1493,7 +1535,7 @@ app.post('/api/reservations', async (req, res) => {
     // Dodaj blokady do bazy danych (tylko dla rezerwacji "oczekująca")
     for (const blockDate of blockDates) {
       try {
-        await pool.query(
+        await dbPool.query(
           'INSERT INTO spot_blocks (spot_id, date, source) VALUES (?, ?, ?)',
           [spot_id, blockDate, 'reservation']
         );
@@ -1521,7 +1563,8 @@ app.get('/api/spots/:id/blocks', async (req, res) => {
   const spotId = req.params.id;
   try {
     console.log('DEBUG: Pobieranie blokad dla stanowiska:', spotId);
-    const [blocks] = await pool.query('SELECT date FROM spot_blocks WHERE spot_id = ?', [spotId]);
+    const dbPool = await checkDatabaseConnection();
+    const [blocks] = await dbPool.query('SELECT date FROM spot_blocks WHERE spot_id = ?', [spotId]);
     console.log('DEBUG: Znalezione blokady (wszystkie source):', blocks);
     res.json(blocks);
   } catch (err) {
@@ -1538,7 +1581,8 @@ app.post('/api/spots/:id/blocks', async (req, res) => {
   }
   try {
     console.log('DEBUG: Dodawanie blokady - stanowisko:', spotId, 'data:', date);
-    await pool.query('INSERT INTO spot_blocks (spot_id, date, source) VALUES (?, ?, ?)', [spotId, date, 'admin']);
+    const dbPool = await checkDatabaseConnection();
+    await dbPool.query('INSERT INTO spot_blocks (spot_id, date, source) VALUES (?, ?, ?)', [spotId, date, 'admin']);
     console.log('DEBUG: Blokada dodana pomyślnie');
     res.json({ success: true });
   } catch (err) {
@@ -1555,7 +1599,8 @@ app.delete('/api/spots/:id/blocks', async (req, res) => {
   }
   try {
     console.log('DEBUG: Usuwanie blokady - stanowisko:', spotId, 'data:', date);
-    const [result] = await pool.query('DELETE FROM spot_blocks WHERE spot_id = ? AND date = ?', [spotId, date]);
+    const dbPool = await checkDatabaseConnection();
+    const [result] = await dbPool.query('DELETE FROM spot_blocks WHERE spot_id = ? AND date = ?', [spotId, date]);
     console.log('DEBUG: Usunięto blokad (wszystkie source):', result.affectedRows);
     res.json({ success: true });
   } catch (err) {
@@ -1574,18 +1619,20 @@ app.get('/api/available-spots', async (req, res) => {
   const startHour = parseInt(String(start_time).split(':')[0], 10);
   const dur = parseInt(duration, 10);
   try {
+    const dbPool = await checkDatabaseConnection();
+    
     // Pobierz wszystkie stanowiska
-    const [spots] = await pool.query('SELECT * FROM spots WHERE is_active = 1');
+    const [spots] = await dbPool.query('SELECT * FROM spots WHERE is_active = 1');
     
     // Pobierz rezerwacje na ten dzień (tylko opłacone i oczekujące)
-    const [reservations] = await pool.query(`
+    const [reservations] = await dbPool.query(`
       SELECT spot_id, start_time, end_time, status, created_at 
       FROM reservations 
       WHERE date = ? AND status IN ('opłacona', 'oczekująca')
     `, [date]);
     
     // Pobierz blokady na ten dzień (całe dni są zablokowane) - wszystkie source
-    const [blocks] = await pool.query('SELECT spot_id FROM spot_blocks WHERE date = ?', [date]);
+    const [blocks] = await dbPool.query('SELECT spot_id FROM spot_blocks WHERE date = ?', [date]);
     
     // Sprawdź dostępność każdego stanowiska
     const available = spots.filter(spot => {
@@ -1647,17 +1694,19 @@ app.get('/api/spots/availability', async (req, res) => {
   console.log('dateTo:', dateTo, 'typ:', typeof dateTo);
   
   try {
+    const dbPool = await checkDatabaseConnection();
+    
     // Pobierz wszystkie stanowiska
-    const [spots] = await pool.query('SELECT * FROM spots WHERE is_active = 1');
+    const [spots] = await dbPool.query('SELECT * FROM spots WHERE is_active = 1');
     
     // Pobierz rezerwacje w zakresie (opłacone i oczekujące)
-    const [reservations] = await pool.query(
+    const [reservations] = await dbPool.query(
       'SELECT spot_id, date, end_date, status, created_at FROM reservations WHERE (date < ? AND end_date > ?) AND status IN ("opłacona", "oczekująca")',
       [dateTo, dateFrom]
     );
     
     // Pobierz blokady w zakresie - wszystkie source
-    const [blocks] = await pool.query(
+    const [blocks] = await dbPool.query(
       'SELECT spot_id, date FROM spot_blocks WHERE date >= ? AND date <= ?',
       [dateFrom, dateTo]
     );
@@ -1758,12 +1807,14 @@ app.get('/api/spots/availability', async (req, res) => {
 // GET /api/check-db-structure
 app.get('/api/check-db-structure', async (req, res) => {
   try {
+    const dbPool = await checkDatabaseConnection();
+    
     // Sprawdź czy tabela spot_blocks istnieje
-    const [tables] = await pool.query('SHOW TABLES LIKE "spot_blocks"');
+    const [tables] = await dbPool.query('SHOW TABLES LIKE "spot_blocks"');
     
     if (tables.length === 0) {
       console.log('🔧 Tabela spot_blocks nie istnieje, tworzę...');
-      await pool.query(`
+      await dbPool.query(`
         CREATE TABLE spot_blocks (
           id INT PRIMARY KEY AUTO_INCREMENT,
           spot_id INT NOT NULL,
@@ -1777,24 +1828,24 @@ app.get('/api/check-db-structure', async (req, res) => {
     } else {
       console.log('✅ Tabela spot_blocks istnieje');
       // Sprawdź czy kolumna hour istnieje i usuń ją jeśli tak
-      const [columns] = await pool.query('DESCRIBE spot_blocks');
+      const [columns] = await dbPool.query('DESCRIBE spot_blocks');
       const hasHourColumn = columns.some(col => col.Field === 'hour');
       if (hasHourColumn) {
         console.log('🔧 Usuwam kolumnę hour z tabeli spot_blocks...');
-        await pool.query('ALTER TABLE spot_blocks DROP COLUMN hour');
+        await dbPool.query('ALTER TABLE spot_blocks DROP COLUMN hour');
         console.log('✅ Kolumna hour usunięta');
       }
       // Sprawdź czy kolumna source istnieje, jeśli nie - dodaj ją
       const hasSourceColumn = columns.some(col => col.Field === 'source');
       if (!hasSourceColumn) {
         console.log('🔧 Dodaję kolumnę source do tabeli spot_blocks...');
-        await pool.query('ALTER TABLE spot_blocks ADD COLUMN source VARCHAR(32) NOT NULL DEFAULT "admin"');
+        await dbPool.query('ALTER TABLE spot_blocks ADD COLUMN source VARCHAR(32) NOT NULL DEFAULT "admin"');
         console.log('✅ Kolumna source dodana');
       }
     }
     
     // Sprawdź strukturę tabeli
-    const [columns] = await pool.query('DESCRIBE spot_blocks');
+    const [columns] = await dbPool.query('DESCRIBE spot_blocks');
     console.log('📋 Struktura tabeli spot_blocks:', columns);
     
     res.json({ 
@@ -1812,8 +1863,10 @@ app.get('/api/check-db-structure', async (req, res) => {
 // DELETE /api/spot-blocks/clear-all – usuń wszystkie blokady
 app.delete('/api/spot-blocks/clear-all', async (req, res) => {
   try {
+    const dbPool = await checkDatabaseConnection();
+    
     // Usuń wszystkie blokady (bez rozróżniania source)
-    const [result] = await pool.query('DELETE FROM spot_blocks');
+    const [result] = await dbPool.query('DELETE FROM spot_blocks');
     console.log(`🗑️ Usunięto wszystkie blokady (${result.affectedRows} rekordów)`);
     res.json({ 
       success: true, 
@@ -1831,7 +1884,8 @@ app.delete('/api/spot-blocks/clear-all', async (req, res) => {
 app.post('/api/spots', async (req, res) => {
   const { name, is_active } = req.body;
   try {
-    const [result] = await pool.query('INSERT INTO spots (is_active) VALUES (?)', [is_active !== undefined ? is_active : 1]);
+    const dbPool = await checkDatabaseConnection();
+    const [result] = await dbPool.query('INSERT INTO spots (is_active) VALUES (?)', [is_active !== undefined ? is_active : 1]);
     res.json({ id: result.insertId });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1841,7 +1895,8 @@ app.post('/api/spots', async (req, res) => {
 app.delete('/api/spots/:id', async (req, res) => {
   const spotId = req.params.id;
   try {
-    await pool.query('DELETE FROM spots WHERE id = ?', [spotId]);
+    const dbPool = await checkDatabaseConnection();
+    await dbPool.query('DELETE FROM spots WHERE id = ?', [spotId]);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1852,7 +1907,8 @@ app.patch('/api/spots/:id', async (req, res) => {
   const spotId = req.params.id;
   const { is_active } = req.body;
   try {
-    await pool.query('UPDATE spots SET is_active = ? WHERE id = ?', [is_active, spotId]);
+    const dbPool = await checkDatabaseConnection();
+    await dbPool.query('UPDATE spots SET is_active = ? WHERE id = ?', [is_active, spotId]);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1864,7 +1920,8 @@ app.patch('/api/spots/:id', async (req, res) => {
 app.get('/api/reservations/:id', async (req, res) => {
   const id = req.params.id;
   try {
-    const [rows] = await pool.query('SELECT * FROM reservations WHERE id = ?', [id]);
+    const dbPool = await checkDatabaseConnection();
+    const [rows] = await dbPool.query('SELECT * FROM reservations WHERE id = ?', [id]);
     if (rows.length === 0) return res.status(404).json({ error: 'Nie znaleziono rezerwacji.' });
     res.json(rows[0]);
   } catch (err) {
@@ -1876,7 +1933,8 @@ app.get('/api/reservations/:id', async (req, res) => {
 app.get('/api/spots/:id/reservations', async (req, res) => {
   const spotId = req.params.id;
   try {
-    const [rows] = await pool.query('SELECT * FROM reservations WHERE spot_id = ?', [spotId]);
+    const dbPool = await checkDatabaseConnection();
+    const [rows] = await dbPool.query('SELECT * FROM reservations WHERE spot_id = ?', [spotId]);
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1895,8 +1953,10 @@ app.patch('/api/reservations/:id', async (req, res) => {
   }
 
   try {
+    const dbPool = await checkDatabaseConnection();
+    
     // Sprawdź czy można zmienić status
-    const [currentReservation] = await pool.query('SELECT * FROM reservations WHERE id = ?', [id]);
+    const [currentReservation] = await dbPool.query('SELECT * FROM reservations WHERE id = ?', [id]);
     if (currentReservation.length === 0) {
       return res.status(404).json({ error: 'Nie znaleziono rezerwacji' });
     }
@@ -1942,7 +2002,7 @@ app.patch('/api/reservations/:id', async (req, res) => {
       return res.status(400).json({ error: 'Można zrealizować zwrot po anulacji tylko dla rezerwacji o statusie "anulowana_admin"' });
     }
     
-    await pool.query('UPDATE reservations SET status = ?, updated_at = NOW() WHERE id = ?', [status, id]);
+    await dbPool.query('UPDATE reservations SET status = ?, updated_at = NOW() WHERE id = ?', [status, id]);
     console.log(`DEBUG: Status zaktualizowany w bazie danych`);
     
     // Jeśli status zmieniono na "opłacona", zmień source blokad i wyślij email
@@ -1971,13 +2031,13 @@ app.patch('/api/reservations/:id', async (req, res) => {
         for (const blockDate of blockDates) {
           try {
             // Usuń starą blokadę
-            await pool.query(
+            await dbPool.query(
               'DELETE FROM spot_blocks WHERE spot_id = ? AND date = ? AND source = ?',
               [resv.spot_id, blockDate, 'reservation']
             );
             
             // Dodaj nową blokadę z source 'paid_reservation'
-            await pool.query(
+            await dbPool.query(
               'INSERT INTO spot_blocks (spot_id, date, source) VALUES (?, ?, ?)',
               [resv.spot_id, blockDate, 'paid_reservation']
             );
@@ -2018,7 +2078,7 @@ app.patch('/api/reservations/:id', async (req, res) => {
       // Usuń blokady z source 'reservation' i 'paid_reservation'
       for (const blockDate of blockDates) {
         try {
-          await pool.query(
+          await dbPool.query(
             'DELETE FROM spot_blocks WHERE spot_id = ? AND date = ? AND source IN (?, ?)',
             [resv.spot_id, blockDate, 'reservation', 'paid_reservation']
           );
@@ -2051,7 +2111,7 @@ app.patch('/api/reservations/:id', async (req, res) => {
       for (const blockDate of blockDates) {
         try {
           // Usuń tylko blokady z source 'reservation' i 'paid_reservation', zachowaj 'admin'
-          await pool.query(
+          await dbPool.query(
             'DELETE FROM spot_blocks WHERE spot_id = ? AND date = ? AND source IN (?, ?)',
             [resv.spot_id, blockDate, 'reservation', 'paid_reservation']
           );
@@ -2084,7 +2144,7 @@ app.patch('/api/reservations/:id', async (req, res) => {
       for (const blockDate of blockDates) {
         try {
           // Usuń tylko blokady z source 'reservation' i 'paid_reservation', zachowaj 'admin'
-          await pool.query(
+          await dbPool.query(
             'DELETE FROM spot_blocks WHERE spot_id = ? AND date = ? AND source IN (?, ?)',
             [resv.spot_id, blockDate, 'reservation', 'paid_reservation']
           );
@@ -2117,7 +2177,7 @@ app.patch('/api/reservations/:id', async (req, res) => {
       for (const blockDate of blockDates) {
         try {
           // Usuń tylko blokady z source 'reservation' i 'paid_reservation', zachowaj 'admin'
-          await pool.query(
+          await dbPool.query(
             'DELETE FROM spot_blocks WHERE spot_id = ? AND date = ? AND source IN (?, ?)',
             [resv.spot_id, blockDate, 'reservation', 'paid_reservation']
           );
@@ -2150,7 +2210,7 @@ app.patch('/api/reservations/:id', async (req, res) => {
       for (const blockDate of blockDates) {
         try {
           // Usuń tylko blokady z source 'reservation' i 'paid_reservation', zachowaj 'admin'
-          await pool.query(
+          await dbPool.query(
             'DELETE FROM spot_blocks WHERE spot_id = ? AND date = ? AND source IN (?, ?)',
             [resv.spot_id, blockDate, 'reservation', 'paid_reservation']
           );
@@ -2217,8 +2277,10 @@ app.post('/api/create-payment', async (req, res) => {
     console.log('🚀 Tworzę płatność Przelewy24');
     console.log('📦 Dane płatności:', { sessionId, amount, description, email, client });
 
+    const dbPool = await checkDatabaseConnection();
+    
     // Znajdź rezerwację po tokenie
-    const [reservations] = await pool.query('SELECT id, status FROM reservations WHERE token = ?', [token]);
+    const [reservations] = await dbPool.query('SELECT id, status FROM reservations WHERE token = ?', [token]);
     if (reservations.length === 0) {
       console.log('❌ Nie znaleziono rezerwacji dla tokenu:', token);
       clearTimeout(timeout);
@@ -2318,7 +2380,8 @@ app.post('/api/create-payment', async (req, res) => {
       console.log('   p24_token:', data.data.token);
       console.log('   reservation_id:', reservationId);
       
-      await pool.query(
+      const dbPool = await checkDatabaseConnection();
+      await dbPool.query(
         'UPDATE reservations SET payment_id = ?, p24_token = ? WHERE id = ?', 
         [uniqueSessionId, data.data.token, reservationId]
       );
@@ -2361,7 +2424,8 @@ app.post('/api/reservations/:id/payment/test', async (req, res) => {
   
   const id = req.params.id;
   try {
-    const [reservation] = await pool.query('SELECT * FROM reservations WHERE id = ?', [id]);
+    const dbPool = await checkDatabaseConnection();
+    const [reservation] = await dbPool.query('SELECT * FROM reservations WHERE id = ?', [id]);
     if (reservation.length === 0) {
       return res.status(404).json({ error: 'Nie znaleziono rezerwacji' });
     }
@@ -2372,7 +2436,7 @@ app.post('/api/reservations/:id/payment/test', async (req, res) => {
     
     // Symuluj udaną płatność
     const sessionId = `test_${resv.id}_${Date.now()}`;
-    await pool.query('UPDATE reservations SET payment_id = ?, status = ?, updated_at = NOW() WHERE id = ?', 
+    await dbPool.query('UPDATE reservations SET payment_id = ?, status = ?, updated_at = NOW() WHERE id = ?', 
       [sessionId, 'opłacona', id]);
     
     // Wyślij email z potwierdzeniem
@@ -2412,7 +2476,8 @@ app.post('/api/test-reservation', async (req, res) => {
     const status = 'oczekująca';
     const amount = 210.00; // 3 doby * 70 zł
     
-    const [result] = await pool.query(
+    const dbPool = await checkDatabaseConnection();
+    const [result] = await dbPool.query(
       `INSERT INTO reservations (first_name, last_name, phone, car_plate, email, spot_id, date, start_time, end_date, end_time, status, token, amount)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ['Test', 'Użytkownik', '123456789', 'TEST123', 'test@example.com', 1, date, start_time, end_date, end_time, status, token, amount]
@@ -2451,8 +2516,10 @@ app.get('/api/rezerwacja/:token', async (req, res) => {
   const token = req.params.token;
   
   try {
+    const dbPool = await checkDatabaseConnection();
+    
     // Znajdź rezerwację po tokenie
-    const [reservations] = await pool.query('SELECT * FROM reservations WHERE token = ?', [token]);
+    const [reservations] = await dbPool.query('SELECT * FROM reservations WHERE token = ?', [token]);
     
     if (reservations.length === 0) {
       return res.status(404).json({ error: 'Nie znaleziono rezerwacji' });
@@ -2496,7 +2563,7 @@ app.get('/api/rezerwacja/:token', async (req, res) => {
             console.log('✅ Płatność potwierdzona! Zmieniam status na "opłacona"');
             
             // Zmień status na "opłacona"
-            await pool.query('UPDATE reservations SET status = ?, updated_at = NOW() WHERE id = ?', ['opłacona', reservation.id]);
+            await dbPool.query('UPDATE reservations SET status = ?, updated_at = NOW() WHERE id = ?', ['opłacona', reservation.id]);
             
             // Zmień source blokad z 'reservation' na 'paid_reservation' (rezerwacja potwierdzona)
             const startDate = new Date(reservation.date);
@@ -2517,13 +2584,13 @@ app.get('/api/rezerwacja/:token', async (req, res) => {
         for (const blockDate of blockDates) {
           try {
                 // Usuń starą blokadę
-            await pool.query(
+            await dbPool.query(
               'DELETE FROM spot_blocks WHERE spot_id = ? AND date = ? AND source = ?',
                   [reservation.spot_id, blockDate, 'reservation']
                 );
                 
                 // Dodaj nową blokadę z source 'paid_reservation'
-                await pool.query(
+                await dbPool.query(
                   'INSERT INTO spot_blocks (spot_id, date, source) VALUES (?, ?, ?)',
                   [reservation.spot_id, blockDate, 'paid_reservation']
                 );
@@ -2608,7 +2675,8 @@ app.get('/api/check-payment/:token', async (req, res) => {
   const token = req.params.token;
   
   try {
-    const [reservations] = await pool.query('SELECT * FROM reservations WHERE token = ?', [token]);
+    const dbPool = await checkDatabaseConnection();
+    const [reservations] = await dbPool.query('SELECT * FROM reservations WHERE token = ?', [token]);
     
     if (reservations.length === 0) {
       return res.status(404).json({ error: 'Nie znaleziono rezerwacji' });
@@ -2684,7 +2752,8 @@ app.post('/api/reservations/:id/payment', async (req, res) => {
   const id = req.params.id;
   const { amount, description } = req.body;
   try {
-    const [reservation] = await pool.query('SELECT * FROM reservations WHERE id = ?', [id]);
+    const dbPool = await checkDatabaseConnection();
+    const [reservation] = await dbPool.query('SELECT * FROM reservations WHERE id = ?', [id]);
     if (reservation.length === 0) {
       return res.status(404).json({ error: 'Nie znaleziono rezerwacji' });
     }
@@ -2721,7 +2790,7 @@ app.post('/api/reservations/:id/payment', async (req, res) => {
       console.log('   reservation id:', id);
       
       // Zapisz payment_id (sessionId) i p24_token w bazie
-      await pool.query('UPDATE reservations SET payment_id = ?, p24_token = ? WHERE id = ?', [sessionId, paymentToken, id]);
+      await dbPool.query('UPDATE reservations SET payment_id = ?, p24_token = ? WHERE id = ?', [sessionId, paymentToken, id]);
       console.log('✅ Zapisano payment_id:', sessionId, 'i p24_token:', paymentToken, 'dla rezerwacji:', id);
     
     // Zwróć dane płatności
@@ -2752,9 +2821,11 @@ app.post('/api/payment/p24/status', async (req, res) => {
   });
   
   try {
+    const dbPool = await checkDatabaseConnection();
+    
     // 1. Znajdź rezerwację na podstawie sessionId
     console.log('🔍 CALLBACK - Szukam rezerwacji dla sessionId:', notification.sessionId);
-    const [reservations] = await pool.query('SELECT * FROM reservations WHERE payment_id = ?', [notification.sessionId]);
+    const [reservations] = await dbPool.query('SELECT * FROM reservations WHERE payment_id = ?', [notification.sessionId]);
     
     if (!reservations || reservations.length === 0) {
       console.error('❌ CALLBACK - Nie znaleziono rezerwacji dla sessionId:', notification.sessionId);
@@ -2796,7 +2867,7 @@ app.post('/api/payment/p24/status', async (req, res) => {
     if (verificationResult.data && verificationResult.data.status === 'success') {
       // 4. Aktualizuj status TYLKO po udanej weryfikacji
       console.log('💾 CALLBACK - Aktualizuję status na opłacona');
-      await pool.query(
+      await dbPool.query(
         'UPDATE reservations SET status = ?, updated_at = NOW() WHERE payment_id = ?',
         ['opłacona', notification.sessionId]
       );
@@ -2820,13 +2891,13 @@ app.post('/api/payment/p24/status', async (req, res) => {
     for (const blockDate of blockDates) {
       try {
         // Usuń starą blokadę
-        await pool.query(
+        await dbPool.query(
           'DELETE FROM spot_blocks WHERE spot_id = ? AND date = ? AND source = ?',
             [reservation.spot_id, blockDate, 'reservation']
         );
         
         // Dodaj nową blokadę z source 'paid_reservation'
-        await pool.query(
+        await dbPool.query(
           'INSERT INTO spot_blocks (spot_id, date, source) VALUES (?, ?, ?)',
             [reservation.spot_id, blockDate, 'paid_reservation']
         );
@@ -2859,7 +2930,8 @@ app.post('/api/payment/p24/status', async (req, res) => {
 app.get('/api/reservations/:id/can-refund', async (req, res) => {
   const id = req.params.id;
   try {
-    const [reservation] = await pool.query('SELECT * FROM reservations WHERE id = ?', [id]);
+    const dbPool = await checkDatabaseConnection();
+    const [reservation] = await dbPool.query('SELECT * FROM reservations WHERE id = ?', [id]);
     if (reservation.length === 0) {
       return res.status(404).json({ error: 'Nie znaleziono rezerwacji' });
     }
@@ -2891,7 +2963,8 @@ app.get('/api/reservations/:id/can-refund', async (req, res) => {
 app.get('/api/reservations/:id/can-cancel', async (req, res) => {
   const id = req.params.id;
   try {
-    const [reservation] = await pool.query('SELECT * FROM reservations WHERE id = ?', [id]);
+    const dbPool = await checkDatabaseConnection();
+    const [reservation] = await dbPool.query('SELECT * FROM reservations WHERE id = ?', [id]);
     if (reservation.length === 0) {
       return res.status(404).json({ error: 'Nie znaleziono rezerwacji' });
     }
@@ -2923,8 +2996,10 @@ app.get('/api/reservations/:id/can-cancel', async (req, res) => {
 app.delete('/api/reservations/:id', async (req, res) => {
   const id = req.params.id;
   try {
+    const dbPool = await checkDatabaseConnection();
+    
     // Pobierz dane rezerwacji przed usunięciem
-    const [reservation] = await pool.query('SELECT * FROM reservations WHERE id = ?', [id]);
+    const [reservation] = await dbPool.query('SELECT * FROM reservations WHERE id = ?', [id]);
     if (reservation.length === 0) {
       return res.status(404).json({ error: 'Nie znaleziono rezerwacji' });
     }
@@ -2949,7 +3024,7 @@ app.delete('/api/reservations/:id', async (req, res) => {
     // Usuń blokady z source 'reservation' i 'paid_reservation'
     for (const blockDate of blockDates) {
       try {
-        await pool.query(
+        await dbPool.query(
           'DELETE FROM spot_blocks WHERE spot_id = ? AND date = ? AND source IN (?, ?)',
           [resv.spot_id, blockDate, 'reservation', 'paid_reservation']
         );
@@ -2962,7 +3037,7 @@ app.delete('/api/reservations/:id', async (req, res) => {
     console.log(`🔓 Usunięto ${blockDates.length} blokad dla rezerwacji ${resv.id} (dni: ${blockDates.join(', ')})`);
     
     // Usuń rezerwację
-    await pool.query('DELETE FROM reservations WHERE id = ?', [id]);
+    await dbPool.query('DELETE FROM reservations WHERE id = ?', [id]);
     console.log(`🗑️ Usunięto rezerwację ${id}`);
     
     res.json({ success: true });
@@ -3021,8 +3096,10 @@ app.get('/api/reservation/status/:token', async (req, res) => {
   try {
     console.log('🔍 Sprawdzam status rezerwacji dla tokenu:', token);
     
+    const dbPool = await checkDatabaseConnection();
+    
     // Pobierz aktualny status z bazy danych
-    const [rows] = await pool.query('SELECT * FROM reservations WHERE token = ?', [token]);
+    const [rows] = await dbPool.query('SELECT * FROM reservations WHERE token = ?', [token]);
     
     if (rows.length === 0) {
       console.log('❌ Nie znaleziono rezerwacji dla tokenu:', token);
@@ -3081,12 +3158,12 @@ app.get('/api/reservation/status/:token', async (req, res) => {
           if (paymentData.data && paymentData.data.status === 1) { // 1 = completed
             console.log('✅ Polling - Transakcja ukończona! Zmieniam status na "opłacona"');
             
-            // Zmień status na "opłacona" (tylko jeśli nie jest już opłacona)
-            if (reservation.status !== 'opłacona') {
-              console.log('💾 Aktualizuję status w bazie z', reservation.status, 'na opłacona');
-              await pool.query(
-                'UPDATE reservations SET status = ?, updated_at = NOW() WHERE id = ?',
-                ['opłacona', reservation.id]
+                          // Zmień status na "opłacona" (tylko jeśli nie jest już opłacona)
+              if (reservation.status !== 'opłacona') {
+                console.log('💾 Aktualizuję status w bazie z', reservation.status, 'na opłacona');
+                await dbPool.query(
+                  'UPDATE reservations SET status = ?, updated_at = NOW() WHERE id = ?',
+                  ['opłacona', reservation.id]
               );
               
               // Zmień source blokad z 'reservation' na 'paid_reservation' (rezerwacja potwierdzona)
@@ -3108,13 +3185,13 @@ app.get('/api/reservation/status/:token', async (req, res) => {
               for (const blockDate of blockDates) {
                 try {
                   // Usuń starą blokadę
-                  await pool.query(
+                  await dbPool.query(
                     'DELETE FROM spot_blocks WHERE spot_id = ? AND date = ? AND source = ?',
                     [reservation.spot_id, blockDate, 'reservation']
                   );
                   
                   // Dodaj nową blokadę z source 'paid_reservation'
-                  await pool.query(
+                  await dbPool.query(
                     'INSERT INTO spot_blocks (spot_id, date, source) VALUES (?, ?, ?)',
                     [reservation.spot_id, blockDate, 'paid_reservation']
                   );
@@ -3132,7 +3209,7 @@ app.get('/api/reservation/status/:token', async (req, res) => {
             }
             
             // Pobierz zaktualizowaną rezerwację
-            const [updatedRows] = await pool.query('SELECT * FROM reservations WHERE id = ?', [reservation.id]);
+            const [updatedRows] = await dbPool.query('SELECT * FROM reservations WHERE id = ?', [reservation.id]);
             console.log('✅ Polling - Zwracam zaktualizowaną rezerwację ze statusem "opłacona"');
             clearTimeout(timeout);
             return res.json(updatedRows[0]);
@@ -3207,8 +3284,10 @@ app.post('/api/add-p24-order-id-column', async (req, res) => {
   try {
     console.log('🔧 Dodaję kolumnę p24_order_id do tabeli reservations');
     
+    const dbPool = await checkDatabaseConnection();
+    
     // Sprawdź czy kolumna już istnieje
-    const [columns] = await pool.query(`
+    const [columns] = await dbPool.query(`
       SELECT COLUMN_NAME 
       FROM INFORMATION_SCHEMA.COLUMNS 
       WHERE TABLE_SCHEMA = DATABASE() 
@@ -3222,7 +3301,7 @@ app.post('/api/add-p24-order-id-column', async (req, res) => {
     }
     
     // Dodaj kolumnę
-    await pool.query('ALTER TABLE reservations ADD COLUMN p24_order_id INT');
+    await dbPool.query('ALTER TABLE reservations ADD COLUMN p24_order_id INT');
     console.log('✅ Kolumna p24_order_id została dodana');
     
     res.json({ message: 'Kolumna p24_order_id została dodana pomyślnie' });
@@ -3237,8 +3316,10 @@ app.post('/api/add-p24-token-column', async (req, res) => {
   try {
     console.log('🔧 Dodaję kolumnę p24_token do tabeli reservations');
     
+    const dbPool = await checkDatabaseConnection();
+    
     // Sprawdź czy kolumna już istnieje
-    const [columns] = await pool.query(`
+    const [columns] = await dbPool.query(`
       SELECT COLUMN_NAME 
       FROM INFORMATION_SCHEMA.COLUMNS 
       WHERE TABLE_SCHEMA = DATABASE() 
@@ -3252,7 +3333,7 @@ app.post('/api/add-p24-token-column', async (req, res) => {
     }
     
     // Dodaj kolumnę
-    await pool.query('ALTER TABLE reservations ADD COLUMN p24_token VARCHAR(255)');
+    await dbPool.query('ALTER TABLE reservations ADD COLUMN p24_token VARCHAR(255)');
     console.log('✅ Kolumna p24_token została dodana');
     
     res.json({ message: 'Kolumna p24_token została dodana pomyślnie' });
@@ -3278,7 +3359,8 @@ app.listen(PORT, '0.0.0.0', async () => {
   // Test połączenia z bazą i sprawdzenie timezone
   if (pool) {
     try {
-      const [timezoneTest] = await pool.query('SELECT NOW() as current_time_val, @@global.time_zone as global_tz, @@session.time_zone as session_tz');
+      const dbPool = await checkDatabaseConnection();
+      const [timezoneTest] = await dbPool.query('SELECT NOW() as current_time_val, @@global.time_zone as global_tz, @@session.time_zone as session_tz');
       console.log('🔧 DEBUG BAZA DANYCH - TIMEZONE:');
       console.log('  current_time:', timezoneTest[0].current_time_val);
       console.log('  global_timezone:', timezoneTest[0].global_tz);
