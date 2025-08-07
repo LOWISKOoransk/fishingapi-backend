@@ -51,6 +51,16 @@ async function testP24Connection() {
     console.log('  reportKey:', P24_CONFIG.reportKey);
     console.log('  baseUrl:', P24_CONFIG.baseUrl);
     
+
+    // Sprawdź IP z którego wysyłamy żądanie
+    try {
+      const ipResponse = await fetch('https://api.ipify.org?format=json');
+      const ipData = await ipResponse.json();
+      console.log('🌐 IP z którego wysyłamy żądanie:', ipData.ip);
+    } catch (ipError) {
+      console.log('⚠️ Nie udało się sprawdzić IP:', ipError.message);
+    }
+    
     const auth = Buffer.from(`${P24_CONFIG.posId}:${P24_CONFIG.reportKey}`).toString('base64');
     console.log('Authorization:', `Basic ${auth}`);
     
@@ -1121,15 +1131,15 @@ let pool;
 
 // Funkcja do tworzenia puli połączeń z lepszą obsługą błędów
 function createDatabasePool() {
-  try {
+try {
     return mysql.createPool({
-      host: process.env.DB_HOST || 'localhost',
-      user: process.env.DB_USER || 'root',
-      password: process.env.DB_PASSWORD || 'Jankopernik1',
-      database: process.env.DB_NAME || 'fishing',
-      waitForConnections: true,
-      connectionLimit: 10,
-      queueLimit: 0,
+    host: process.env.DB_HOST || 'localhost',
+    user: process.env.DB_USER || 'root',
+    password: process.env.DB_PASSWORD || 'Jankopernik1',
+    database: process.env.DB_NAME || 'fishing',
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
       timezone: '+02:00', // Ustaw timezone na polską strefę czasową (CEST)
       acquireTimeout: 60000, // 60 sekund na uzyskanie połączenia
       timeout: 60000, // 60 sekund timeout na zapytania
@@ -1145,7 +1155,7 @@ function createDatabasePool() {
 // Inicjalizacja puli
 pool = createDatabasePool();
 
-// Test połączenia z bazą danych (nie blokuj uruchamiania serwera)
+  // Test połączenia z bazą danych (nie blokuj uruchamiania serwera)
 if (pool) {
   pool.getConnection((err, connection) => {
     if (err) {
@@ -1172,7 +1182,7 @@ async function checkDatabaseConnection() {
   try {
     const connection = await pool.getConnection();
     connection.release();
-    return pool;
+  return pool;
   } catch (error) {
     console.error('❌ Błąd połączenia z bazą danych:', error.message);
     
@@ -2234,10 +2244,22 @@ app.patch('/api/reservations/:id', async (req, res) => {
 // GET /api/payment/p24/test-connection – test połączenia z sandbox
 app.get('/api/payment/p24/test-connection', async (req, res) => {
   try {
+    // Sprawdź IP z którego wysyłamy żądanie
+    let clientIP = 'unknown';
+    try {
+      const ipResponse = await fetch('https://api.ipify.org?format=json');
+      const ipData = await ipResponse.json();
+      clientIP = ipData.ip;
+      console.log('🌐 IP z którego wysyłamy żądanie do Przelewy24:', clientIP);
+    } catch (ipError) {
+      console.log('⚠️ Nie udało się sprawdzić IP:', ipError.message);
+    }
+    
     const testResult = await testP24Connection();
     res.json({ 
       success: true, 
       testResult,
+      clientIP: clientIP,
       config: {
         baseUrl: P24_CONFIG.baseUrl,
         merchantId: P24_CONFIG.merchantId,
@@ -2278,7 +2300,7 @@ app.post('/api/create-payment', async (req, res) => {
     console.log('📦 Dane płatności:', { sessionId, amount, description, email, client });
 
     const dbPool = await checkDatabaseConnection();
-    
+
     // Znajdź rezerwację po tokenie
     const [reservations] = await dbPool.query('SELECT id, status FROM reservations WHERE token = ?', [token]);
     if (reservations.length === 0) {
@@ -3158,12 +3180,12 @@ app.get('/api/reservation/status/:token', async (req, res) => {
           if (paymentData.data && paymentData.data.status === 1) { // 1 = completed
             console.log('✅ Polling - Transakcja ukończona! Zmieniam status na "opłacona"');
             
-                          // Zmień status na "opłacona" (tylko jeśli nie jest już opłacona)
-              if (reservation.status !== 'opłacona') {
-                console.log('💾 Aktualizuję status w bazie z', reservation.status, 'na opłacona');
+            // Zmień status na "opłacona" (tylko jeśli nie jest już opłacona)
+            if (reservation.status !== 'opłacona') {
+              console.log('💾 Aktualizuję status w bazie z', reservation.status, 'na opłacona');
                 await dbPool.query(
-                  'UPDATE reservations SET status = ?, updated_at = NOW() WHERE id = ?',
-                  ['opłacona', reservation.id]
+                'UPDATE reservations SET status = ?, updated_at = NOW() WHERE id = ?',
+                ['opłacona', reservation.id]
               );
               
               // Zmień source blokad z 'reservation' na 'paid_reservation' (rezerwacja potwierdzona)
