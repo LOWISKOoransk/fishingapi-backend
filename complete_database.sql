@@ -1,11 +1,6 @@
 -- Kompletna baza danych dla Łowisko Młyn Rańsk
 -- Importuj ten plik na lh.pl aby utworzyć wszystkie tabele i dane
 
--- Usuń bazy danych jeśli istnieją (dla czystego startu)
-DROP DATABASE IF EXISTS fishing;
-CREATE DATABASE fishing CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE fishing;
-
 -- Tabela stanowisk wędkarskich
 CREATE TABLE spots (
     id INT PRIMARY KEY AUTO_INCREMENT,
