@@ -23,7 +23,8 @@ async function testEmailSending() {
     });
     console.log('✅ Test email wysłany pomyślnie');
   } catch (error) {
-    console.error('❌ Błąd testu emaila:', error);
+    console.error('❌ Błąd testu emaila:', error.message);
+    console.log('⚠️ Serwer uruchomi się bez testu emaila');
   }
 }
 
@@ -258,6 +259,12 @@ async function createP24Payment(reservation, amount) {
 // Funkcja do sprawdzania płatności co 5 sekund dla rezerwacji "platnosc_w_toku"
 async function checkPaymentStatuses() {
   try {
+    // Sprawdź czy baza danych jest dostępna
+    if (!pool) {
+      console.log('⚠️ Baza danych niedostępna - pomijam sprawdzanie płatności');
+      return;
+    }
+
     // Znajdź WSZYSTKIE rezerwacje "platnosc_w_toku" (niezależnie od wieku) - DYNAMICZNE SPRAWDZANIE
     const [paymentInProgressReservations] = await pool.query(`
       SELECT id, spot_id, date, end_date, status, created_at, payment_id 
@@ -349,6 +356,12 @@ async function checkPaymentStatuses() {
 // Funkcja do automatycznego zmieniania statusów rezerwacji
 async function checkAndUpdateReservationStatuses() {
   try {
+    // Sprawdź czy baza danych jest dostępna
+    if (!pool) {
+      console.log('⚠️ Baza danych niedostępna - pomijam sprawdzanie statusów rezerwacji');
+      return;
+    }
+
     // KROK 1: Znajdź rezerwacje "oczekująca" starsze niż 900 sekund (dokładnie 15 minut)
     const [expiredReservations] = await pool.query(`
       SELECT id, spot_id, date, end_date, status, created_at, payment_id,
@@ -1110,46 +1123,64 @@ console.log('DB_USER:', process.env.DB_USER);
 console.log('DB_NAME:', process.env.DB_NAME);
 console.log('NODE_ENV:', process.env.NODE_ENV);
 
-const pool = mysql.createPool({
-  host: process.env.DB_HOST || 'localhost',
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || 'Jankopernik1',
-  database: process.env.DB_NAME || 'fishing',
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0,
-  timezone: '+02:00' // Ustaw timezone na polską strefę czasową (CEST)
-});
+let pool;
 
-// Test połączenia z bazą danych
-pool.getConnection((err, connection) => {
-  if (err) {
-    console.error('❌ Błąd połączenia z bazą danych:', err);
-    console.error('   Sprawdź zmienne środowiskowe DB_HOST, DB_USER, DB_PASSWORD, DB_NAME');
-    console.error('   Upewnij się, że baza danych jest dostępna');
-  } else {
-    console.log('✅ Połączenie z bazą danych udane');
-    connection.release();
+try {
+  pool = mysql.createPool({
+    host: process.env.DB_HOST || 'localhost',
+    user: process.env.DB_USER || 'root',
+    password: process.env.DB_PASSWORD || 'Jankopernik1',
+    database: process.env.DB_NAME || 'fishing',
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
+    timezone: '+02:00' // Ustaw timezone na polską strefę czasową (CEST)
+  });
+
+  // Test połączenia z bazą danych (nie blokuj uruchamiania serwera)
+  pool.getConnection((err, connection) => {
+    if (err) {
+      console.error('❌ Błąd połączenia z bazą danych:', err.message);
+      console.error('   Sprawdź zmienne środowiskowe DB_HOST, DB_USER, DB_PASSWORD, DB_NAME');
+      console.error('   Serwer uruchomi się bez bazy danych - niektóre funkcje mogą nie działać');
+    } else {
+      console.log('✅ Połączenie z bazą danych udane');
+      connection.release();
+    }
+  });
+} catch (error) {
+  console.error('❌ Błąd podczas tworzenia puli połączeń:', error.message);
+  console.error('   Serwer uruchomi się bez bazy danych - niektóre funkcje mogą nie działać');
+  pool = null;
+}
+
+// Funkcja pomocnicza do sprawdzania dostępności bazy danych
+function checkDatabaseConnection() {
+  if (!pool) {
+    throw new Error('Baza danych niedostępna');
   }
-});
+  return pool;
+}
 
 // GET /api/spots – lista wszystkich stanowisk
 app.get('/api/spots', async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM spots');
+    const dbPool = checkDatabaseConnection();
+    const [rows] = await dbPool.query('SELECT * FROM spots');
     res.json(rows);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(503).json({ error: err.message });
   }
 });
 
 // GET /api/reservations – lista wszystkich rezerwacji
 app.get('/api/reservations', async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM reservations ORDER BY created_at DESC');
+    const dbPool = checkDatabaseConnection();
+    const [rows] = await dbPool.query('SELECT * FROM reservations ORDER BY created_at DESC');
     res.json(rows);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(503).json({ error: err.message });
   }
 });
 
@@ -1159,7 +1190,8 @@ app.get('/api/reservations/token/:token', async (req, res) => {
   console.log('🔍 Endpoint /api/reservations/token/:token wywołany dla tokenu:', token);
   
   try {
-    const [rows] = await pool.query('SELECT * FROM reservations WHERE token = ?', [token]);
+    const dbPool = checkDatabaseConnection();
+    const [rows] = await dbPool.query('SELECT * FROM reservations WHERE token = ?', [token]);
     if (rows.length === 0) {
       console.log('❌ Nie znaleziono rezerwacji dla tokenu:', token);
       return res.status(404).json({ error: 'Rezerwacja nie została znaleziona' });
@@ -3244,14 +3276,18 @@ app.listen(PORT, '0.0.0.0', async () => {
   console.log(`Callback URL: https://lowisko-1.onrender.com/api/payment/p24/status`);
   
   // Test połączenia z bazą i sprawdzenie timezone
-  try {
-    const [timezoneTest] = await pool.query('SELECT NOW() as current_time_val, @@global.time_zone as global_tz, @@session.time_zone as session_tz');
-    console.log('🔧 DEBUG BAZA DANYCH - TIMEZONE:');
-    console.log('  current_time:', timezoneTest[0].current_time_val);
-    console.log('  global_timezone:', timezoneTest[0].global_tz);
-    console.log('  session_timezone:', timezoneTest[0].session_tz);
-  } catch (error) {
-    console.error('❌ Błąd podczas sprawdzania timezone:', error);
+  if (pool) {
+    try {
+      const [timezoneTest] = await pool.query('SELECT NOW() as current_time_val, @@global.time_zone as global_tz, @@session.time_zone as session_tz');
+      console.log('🔧 DEBUG BAZA DANYCH - TIMEZONE:');
+      console.log('  current_time:', timezoneTest[0].current_time_val);
+      console.log('  global_timezone:', timezoneTest[0].global_tz);
+      console.log('  session_timezone:', timezoneTest[0].session_tz);
+    } catch (error) {
+      console.error('❌ Błąd podczas sprawdzania timezone:', error.message);
+    }
+  } else {
+    console.log('⚠️ Baza danych niedostępna - pomijam sprawdzanie timezone');
   }
   
   // Uruchom timer do sprawdzania statusów rezerwacji co 1 sekundę dla lepszej synchronizacji
