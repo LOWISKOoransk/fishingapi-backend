@@ -16,7 +16,7 @@ async function testEmailSending() {
   try {
     console.log('🧪 Testuję wysyłanie emaila...');
     await resend.emails.send({
-      from: 'rezerwacje@podrecznikmilionera.pl',
+      from: 'rezerwacje@lowiskomlynransk.pl',
       to: 'test@example.com',
       subject: 'Test email - Łowisko Młyn Rańsk',
       html: '<h1>Test email</h1><p>To jest test wysyłania emaila.</p>'
@@ -209,7 +209,7 @@ async function createP24Payment(reservation, amount) {
           description: `Łowisko Młyn Rańsk - Rezerwacja stanowiska ${reservation.spot_id} na czas ${getDurationText(reservation.date, reservation.end_date)} - ${reservation.first_name} ${reservation.last_name}`,
     email: reservation.email,
     country: 'PL',
-    urlReturn: `https://podrecznikmilionera.pl/payment/return/${reservation.token}?fromPayment=true`,
+    urlReturn: `https://lowiskomlynransk.pl/payment/return/${reservation.token}?fromPayment=true`,
     urlStatus: `https://lowisko-1.onrender.com/api/payment/p24/status`,
     client: `${reservation.first_name} ${reservation.last_name}`,
     address: '',
@@ -578,7 +578,7 @@ function formatDateForDisplay(dateString) {
 // Funkcje do wysyłania emaili
 async function sendReservationEmail(reservation) {
   try {
-    const paymentUrl = `https://podrecznikmilionera.pl/rezerwacja/${reservation.token}`;
+    const paymentUrl = `https://lowiskomlynransk.pl/rezerwacja/${reservation.token}`;
     const transactionDate = new Date().toLocaleString('pl-PL');
     const transactionNumber = `TR-${new Date().getFullYear()}-${String(reservation.id).padStart(3, '0')}`;
     const vatRate = 23;
@@ -644,7 +644,7 @@ async function sendReservationEmail(reservation) {
 
     // Wysyłam email przez Resend
     await resend.emails.send({
-      from: 'rezerwacje@podrecznikmilionera.pl',
+      from: 'rezerwacje@lowiskomlynransk.pl',
       to: reservation.email,
       subject: 'Rezerwacja utworzona - czeka na płatność - Łowisko Młyn Rańsk',
       html: html
@@ -662,7 +662,7 @@ async function sendPaymentConfirmationEmail(reservation) {
   console.log(`DEBUG: Rozpoczynam wysyłanie emaila z potwierdzeniem płatności`);
   console.log(`DEBUG: Dane rezerwacji:`, reservation);
   try {
-    const cancelUrl = `https://podrecznikmilionera.pl/rezerwacja/${reservation.token}`;
+    const cancelUrl = `https://lowiskomlynransk.pl/rezerwacja/${reservation.token}`;
     const transactionDate = new Date().toLocaleString('pl-PL');
     const transactionNumber = `TR-${new Date().getFullYear()}-${String(reservation.id).padStart(3, '0')}`;
     const vatRate = 23;
@@ -735,7 +735,7 @@ async function sendPaymentConfirmationEmail(reservation) {
     console.log(`DEBUG: Wysyłam email przez Resend do: ${reservation.email}`);
     // Wysyłam email przez Resend
     await resend.emails.send({
-      from: 'rezerwacje@podrecznikmilionera.pl',
+      from: 'rezerwacje@lowiskomlynransk.pl',
       to: reservation.email,
       subject: 'Rezerwacja potwierdzona - Łowisko Młyn Rańsk',
       html: html
@@ -801,7 +801,7 @@ async function sendReservationCancellationEmail(reservation) {
         <div style="background-color: #eff6ff; padding: 20px; border-radius: 8px; margin: 20px; border-left: 4px solid #3b82f6;">
           <h3 style="color: #1e3a8a; margin-top: 0; font-size: 18px;">Chcesz zarezerwować ponownie?</h3>
           <p>Możesz utworzyć nową rezerwację na naszej stronie internetowej.</p>
-          <a href="https://podrecznikmilionera.pl" style="display: inline-block; background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; box-shadow: 0 4px 6px rgba(59, 130, 246, 0.3);">
+          <a href="https://lowiskomlynransk.pl" style="display: inline-block; background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; box-shadow: 0 4px 6px rgba(59, 130, 246, 0.3);">
             Zarezerwuj ponownie
           </a>
         </div>
@@ -817,7 +817,7 @@ async function sendReservationCancellationEmail(reservation) {
     console.log(`DEBUG: Wysyłam email przez Resend do: ${reservation.email}`);
     // Wysyłam email przez Resend
     await resend.emails.send({
-      from: 'rezerwacje@podrecznikmilionera.pl',
+      from: 'rezerwacje@lowiskomlynransk.pl',
       to: reservation.email,
       subject: 'Rezerwacja anulowana - Łowisko Młyn Rańsk',
       html: html
@@ -860,7 +860,7 @@ async function sendRefundRequestedEmail(reservation) {
         
         <div style="background-color: #eff6ff; padding: 20px; border-radius: 8px; margin: 20px; border-left: 4px solid #3b82f6;">
           <h3 style="color: #1e3a8a; margin-top: 0; font-size: 18px;">Sprawdź status rezerwacji:</h3>
-          <a href="https://podrecznikmilionera.pl/rezerwacja/${reservation.token}" style="display: inline-block; background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; box-shadow: 0 4px 6px rgba(59, 130, 246, 0.3);">
+          <a href="https://lowiskomlynransk.pl/rezerwacja/${reservation.token}" style="display: inline-block; background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; box-shadow: 0 4px 6px rgba(59, 130, 246, 0.3);">
             Sprawdź status rezerwacji
           </a>
         </div>
@@ -883,7 +883,7 @@ async function sendRefundRequestedEmail(reservation) {
     `;
 
     await resend.emails.send({
-      from: 'rezerwacje@podrecznikmilionera.pl',
+      from: 'rezerwacje@lowiskomlynransk.pl',
       to: reservation.email,
       subject: 'Zwrot zgłoszony - Łowisko Młyn Rańsk',
       html: html
@@ -924,7 +924,7 @@ async function sendAdminCancellationEmail(reservation) {
         
         <div style="background-color: #e3f2fd; padding: 20px; border-radius: 8px; margin: 20px 0;">
           <h3 style="color: #1976d2; margin-top: 0;">Sprawdź status rezerwacji:</h3>
-          <a href="https://podrecznikmilionera.pl/rezerwacja/${reservation.token}" style="display: inline-block; background-color: #1976d2; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">
+          <a href="https://lowiskomlynransk.pl/rezerwacja/${reservation.token}" style="display: inline-block; background-color: #1976d2; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">
             Sprawdź status rezerwacji
           </a>
         </div>
@@ -947,7 +947,7 @@ async function sendAdminCancellationEmail(reservation) {
     `;
 
     await resend.emails.send({
-      from: 'rezerwacje@podrecznikmilionera.pl',
+      from: 'rezerwacje@lowiskomlynransk.pl',
       to: reservation.email,
       subject: 'Rezerwacja anulowana przez administratora - Łowisko Młyn Rańsk',
       html: html
@@ -988,7 +988,7 @@ async function sendRefundCompletedEmail(reservation) {
         
         <div style="background-color: #e3f2fd; padding: 20px; border-radius: 8px; margin: 20px 0;">
           <h3 style="color: #1976d2; margin-top: 0;">Sprawdź status rezerwacji:</h3>
-          <a href="https://podrecznikmilionera.pl/rezerwacja/${reservation.token}" style="display: inline-block; background-color: #1976d2; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">
+          <a href="https://lowiskomlynransk.pl/rezerwacja/${reservation.token}" style="display: inline-block; background-color: #1976d2; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">
             Sprawdź status rezerwacji
           </a>
         </div>
@@ -1011,7 +1011,7 @@ async function sendRefundCompletedEmail(reservation) {
     `;
 
     await resend.emails.send({
-      from: 'rezerwacje@podrecznikmilionera.pl',
+      from: 'rezerwacje@lowiskomlynransk.pl',
       to: reservation.email,
       subject: 'Zwrot zrealizowany - Łowisko Młyn Rańsk',
       html: html
@@ -1052,7 +1052,7 @@ async function sendAdminRefundCompletedEmail(reservation) {
         
         <div style="background-color: #e3f2fd; padding: 20px; border-radius: 8px; margin: 20px 0;">
           <h3 style="color: #1976d2; margin-top: 0;">Sprawdź status rezerwacji:</h3>
-          <a href="https://podrecznikmilionera.pl/rezerwacja/${reservation.token}" style="display: inline-block; background-color: #1976d2; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">
+          <a href="https://lowiskomlynransk.pl/rezerwacja/${reservation.token}" style="display: inline-block; background-color: #1976d2; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">
             Sprawdź status rezerwacji
           </a>
         </div>
@@ -1075,7 +1075,7 @@ async function sendAdminRefundCompletedEmail(reservation) {
     `;
 
     await resend.emails.send({
-      from: 'rezerwacje@podrecznikmilionera.pl',
+      from: 'rezerwacje@lowiskomlynransk.pl',
       to: reservation.email,
       subject: 'Zwrot po anulacji zrealizowany - Łowisko Młyn Rańsk',
       html: html
@@ -1093,8 +1093,7 @@ const PORT = process.env.PORT || 4000;
 // Konfiguracja CORS - pozwól na żądania z frontendu
 app.use(cors({
   origin: [
-    'https://podrecznikmilionera.pl', // Nowa domena
-    'https://lowiskomlynransk.pl', // Stara domena
+    'https://lowiskomlynransk.pl', // Główna domena
     'http://localhost:5173',
     'http://localhost:3000',
     'http://localhost:4000',
@@ -2354,7 +2353,7 @@ app.post('/api/create-payment', async (req, res) => {
     client,
     country,
     language,
-    urlReturn: `https://podrecznikmilionera.pl/payment/return/${token}?fromPayment=true`,
+    urlReturn: `https://lowiskomlynransk.pl/payment/return/${token}?fromPayment=true`,
     urlStatus: `https://lowisko-1.onrender.com/api/payment/p24/status`,
     sign,
     timeLimit: 5
