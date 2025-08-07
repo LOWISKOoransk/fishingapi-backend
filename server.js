@@ -1253,7 +1253,7 @@ app.get('/api/reservations/token/:token', async (req, res) => {
             const errorResponse = {
               ...reservation,
               paymentError: true,
-              redirectTo: `/rezerwacja-błąd/${reservation.token}`
+              redirectTo: `/rezerwacja-error/${reservation.token}`
             };
             console.log('❌ Zwracam błąd płatności z przekierowaniem');
             return res.json(errorResponse);
@@ -1268,7 +1268,7 @@ app.get('/api/reservations/token/:token', async (req, res) => {
           const errorResponse = {
             ...reservation,
             paymentError: true,
-            redirectTo: `/rezerwacja-błąd/${reservation.token}`
+            redirectTo: `/rezerwacja-error/${reservation.token}`
           };
           console.log('❌ Zwracam błąd płatności z przekierowaniem');
           return res.json(errorResponse);
@@ -1281,7 +1281,7 @@ app.get('/api/reservations/token/:token', async (req, res) => {
         const errorResponse = {
           ...reservation,
           paymentError: true,
-          redirectTo: `/rezerwacja-błąd/${reservation.token}`
+          redirectTo: `/rezerwacja-error/${reservation.token}`
         };
         console.log('❌ Zwracam błąd płatności z przekierowaniem');
         return res.json(errorResponse);
@@ -2522,7 +2522,7 @@ app.get('/api/rezerwacja/:token', async (req, res) => {
             return res.json({
               success: false,
               message: 'Płatność nie została zrealizowana',
-              redirectTo: `/rezerwacja-błąd/${reservation.token}`,
+              redirectTo: `/rezerwacja-error/${reservation.token}`,
               reservation: {
                 id: reservation.id,
                 status: reservation.status,
