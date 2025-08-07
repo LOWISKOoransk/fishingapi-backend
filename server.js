@@ -30,6 +30,17 @@ async function testEmailSending() {
 // Uruchom test przy starcie
 testEmailSending();
 
+// Konfiguracja Przelewy24 (testowe dane)
+const P24_CONFIG = {
+  merchantId: 353899, // Zmienione na number
+  posId: 353899, // Zmienione na number
+  apiKey: 'c87d5e5e', // Klucz do zamówień z sandboxa
+  crc: '7b524bd130131923', // Klucz do CRC z sandboxa
+  reportKey: '8ba2af407cdcea7d7a3e7e90cd404389', // Klucz do raportów (secretId)
+  sandbox: true,
+  baseUrl: 'https://sandbox.przelewy24.pl/api/v1' // Poprawne base URL dla sandbox API
+};
+
 // Test połączenia z sandbox Przelewy24
 async function testP24Connection() {
   try {
@@ -74,17 +85,6 @@ function getDurationText(startDate, endDate) {
     return `${diffDays} dób`;
   }
 }
-
-// Konfiguracja Przelewy24 (testowe dane)
-const P24_CONFIG = {
-  merchantId: 353899, // Zmienione na number
-  posId: 353899, // Zmienione na number
-  apiKey: 'c87d5e5e', // Klucz do zamówień z sandboxa
-  crc: '7b524bd130131923', // Klucz do CRC z sandboxa
-  reportKey: '8ba2af407cdcea7d7a3e7e90cd404389', // Klucz do raportów (secretId)
-  sandbox: true,
-  baseUrl: 'https://sandbox.przelewy24.pl/api/v1' // Poprawne base URL dla sandbox API
-};
 
 // Funkcje do obsługi Przelewy24
 function generateP24Signature(params) {
