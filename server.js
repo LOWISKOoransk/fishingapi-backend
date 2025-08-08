@@ -1364,6 +1364,17 @@ app.get('/api/reservations/token/:token', async (req, res) => {
               return res.json(errorResponse);
             }
 
+            // Dla rezerwacji w statusie "platnosc_w_toku" - jeśli płatność nie została potwierdzona, przekieruj na stronę błędu
+            if (reservation.status === 'platnosc_w_toku') {
+              console.log('❌ Rezerwacja w statusie "platnosc_w_toku" - płatność nie została potwierdzona, przekierowuję na stronę błędu.');
+              const errorResponse = {
+                ...reservation,
+                paymentError: true,
+                redirectTo: `/rezerwacja-error/${reservation.token}`
+              };
+              return res.json(errorResponse);
+            }
+
             // Inne stany – nie traktuj automatycznie jako błąd (może być w toku). Zwróć rezerwację bez redirectu.
             console.log('ℹ️ Płatność nie jest potwierdzona i nie jest status 0 (wartość:', paymentData.data?.status, '). Zwracam rezerwację bez redirectu.');
             return res.json(reservation);
@@ -1372,12 +1383,36 @@ app.get('/api/reservations/token/:token', async (req, res) => {
           console.log('❌ Nie udało się sprawdzić statusu płatności (status:', response.status, ')');
           const errorData = await response.text();
           console.log('Błąd z Przelewy24:', errorData);
+          
+          // Dla rezerwacji w statusie "platnosc_w_toku" - jeśli nie udało się sprawdzić statusu płatności, przekieruj na stronę błędu
+          if (reservation.status === 'platnosc_w_toku') {
+            console.log('❌ Rezerwacja w statusie "platnosc_w_toku" - błąd sprawdzania statusu płatności, przekierowuję na stronę błędu.');
+            const errorResponse = {
+              ...reservation,
+              paymentError: true,
+              redirectTo: `/rezerwacja-error/${reservation.token}`
+            };
+            return res.json(errorResponse);
+          }
+          
           // Nie przekierowuj – zwróć bieżącą rezerwację i pozwól frontendowi kontynuować polling/status.
           console.log('ℹ️ Zwracam rezerwację bez redirectu po błędzie sprawdzania statusu.');
           return res.json(reservation);
         }
       } catch (error) {
         console.error('❌ Błąd podczas sprawdzania statusu płatności:', error);
+        
+        // Dla rezerwacji w statusie "platnosc_w_toku" - jeśli wystąpił błąd podczas sprawdzania statusu płatności, przekieruj na stronę błędu
+        if (reservation.status === 'platnosc_w_toku') {
+          console.log('❌ Rezerwacja w statusie "platnosc_w_toku" - błąd podczas sprawdzania statusu płatności, przekierowuję na stronę błędu.');
+          const errorResponse = {
+            ...reservation,
+            paymentError: true,
+            redirectTo: `/rezerwacja-error/${reservation.token}`
+          };
+          return res.json(errorResponse);
+        }
+        
         // Nie przekierowuj – zwróć bieżącą rezerwację i pozwól frontendowi kontynuować polling/status.
         console.log('ℹ️ Zwracam rezerwację bez redirectu po wyjątku podczas sprawdzania statusu.');
         return res.json(reservation);
