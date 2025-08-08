@@ -45,7 +45,7 @@ const P24_CONFIG = {
 // Konfiguracja domen
 const DOMAIN_CONFIG = {
   frontend: process.env.FRONTEND_URL || 'https://lowiskomlynransk.pl',
-  backend: process.env.BACKEND_URL || 'https://lowisko-1.onrender.com'
+  backend: process.env.BACKEND_URL || 'https://fishing-api-backend.onrender.com'
 };
 
 // Test połączenia z sandbox Przelewy24
@@ -1142,10 +1142,10 @@ try {
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0,
-      timezone: '+02:00', // Ustaw timezone na polską strefę czasową (CEST)
-      acquireTimeout: 60000, // 60 sekund na uzyskanie połączenia
-      timeout: 60000, // 60 sekund timeout na zapytania
-      reconnect: true, // Automatyczne reconnect
+      timezone: '+02:00',
+      // Usunięto nieobsługiwane: acquireTimeout, timeout, reconnect
+      // Zamiast tego ustawiamy connectTimeout
+      connectTimeout: 60000,
       charset: 'utf8mb4'
     });
   } catch (error) {
@@ -3299,7 +3299,7 @@ app.get('/api/test-callback', (req, res) => {
   res.json({ 
     message: 'Callback endpoint dostępny',
     timestamp: new Date().toISOString(),
-    server: 'lowisko-1.onrender.com'
+    server: 'fishing-api-backend.onrender.com'
   });
 });
 
@@ -3378,7 +3378,7 @@ app.use('*', (req, res) => {
 
 app.listen(PORT, '0.0.0.0', async () => {
   console.log(`API działa na http://0.0.0.0:${PORT}`);
-  console.log(`Callback URL: https://lowisko-1.onrender.com/api/payment/p24/status`);
+  console.log(`Callback URL: https://fishing-api-backend.onrender.com/api/payment/p24/status`);
   
   // Test połączenia z bazą i sprawdzenie timezone
   if (pool) {
