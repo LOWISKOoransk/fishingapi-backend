@@ -1332,43 +1332,24 @@ app.get('/api/reservations/token/:token', async (req, res) => {
             console.log('✅ Zwracam zaktualizowaną rezerwację ze statusem "opłacona"');
             return res.json(updatedRows[0]);
           } else {
-            console.log('❌ Płatność nie została zrealizowana (status:', paymentData.data?.status, ')');
-            // Przekieruj na stronę błędu płatności
-            const errorResponse = {
-              ...reservation,
-              paymentError: true,
-              redirectTo: `/rezerwacja-error/${reservation.token}`
-            };
-            console.log('❌ Zwracam błąd płatności z przekierowaniem');
-            return res.json(errorResponse);
+            // Nie traktuj automatycznie jako błąd: status może być jeszcze w toku lub P24 może chwilowo nie zwrócić finalnego stanu.
+            // Zwróć rezerwację bez redirectu; frontend sam będzie odświeżał status i pokazywał właściwy komunikat.
+            console.log('ℹ️ Płatność jeszcze niepotwierdzona (status:', paymentData.data?.status, '). Zwracam rezerwację bez redirectu.');
+            return res.json(reservation);
           }
         } else {
           console.log('❌ Nie udało się sprawdzić statusu płatności (status:', response.status, ')');
           const errorData = await response.text();
           console.log('Błąd z Przelewy24:', errorData);
-          
-          // Gdy nie można sprawdzić statusu płatności, traktuj to jako błąd płatności
-          console.log('❌ Traktuję błąd sprawdzania statusu jako błąd płatności');
-          const errorResponse = {
-            ...reservation,
-            paymentError: true,
-            redirectTo: `/rezerwacja-error/${reservation.token}`
-          };
-          console.log('❌ Zwracam błąd płatności z przekierowaniem');
-          return res.json(errorResponse);
+          // Nie przekierowuj – zwróć bieżącą rezerwację i pozwól frontendowi kontynuować polling/status.
+          console.log('ℹ️ Zwracam rezerwację bez redirectu po błędzie sprawdzania statusu.');
+          return res.json(reservation);
         }
       } catch (error) {
         console.error('❌ Błąd podczas sprawdzania statusu płatności:', error);
-        
-        // Gdy wystąpi błąd podczas sprawdzania statusu, traktuj to jako błąd płatności
-        console.log('❌ Traktuję błąd sprawdzania statusu jako błąd płatności');
-        const errorResponse = {
-          ...reservation,
-          paymentError: true,
-          redirectTo: `/rezerwacja-error/${reservation.token}`
-        };
-        console.log('❌ Zwracam błąd płatności z przekierowaniem');
-        return res.json(errorResponse);
+        // Nie przekierowuj – zwróć bieżącą rezerwację i pozwól frontendowi kontynuować polling/status.
+        console.log('ℹ️ Zwracam rezerwację bez redirectu po wyjątku podczas sprawdzania statusu.');
+        return res.json(reservation);
       }
     } else {
       console.log('❌ Rezerwacja nie ma payment_id - nie sprawdzam statusu płatności');
@@ -3405,15 +3386,4 @@ app.listen(PORT, '0.0.0.0', async () => {
   // Uruchom timer do sprawdzania płatności co 5 sekund
   setInterval(checkPaymentStatuses, 5000); // 5000ms = 5 sekund
   console.log('Timer płatności uruchomiony (sprawdzanie co 5 sekund)');
-});
-
-// GET /api/my-ip – zwróć aktualny publiczny IP serwera
-app.get('/api/my-ip', async (req, res) => {
-  try {
-    const response = await fetch('https://api.ipify.org?format=json');
-    const data = await response.json();
-    res.json({ ip: data.ip, timestamp: new Date().toISOString() });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
 });
