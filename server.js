@@ -1332,9 +1332,19 @@ app.get('/api/reservations/token/:token', async (req, res) => {
             console.log('✅ Zwracam zaktualizowaną rezerwację ze statusem "opłacona"');
             return res.json(updatedRows[0]);
           } else {
-            // Nie traktuj automatycznie jako błąd: status może być jeszcze w toku lub P24 może chwilowo nie zwrócić finalnego stanu.
-            // Zwróć rezerwację bez redirectu; frontend sam będzie odświeżał status i pokazywał właściwy komunikat.
-            console.log('ℹ️ Płatność jeszcze niepotwierdzona (status:', paymentData.data?.status, '). Zwracam rezerwację bez redirectu.');
+            // Jeśli Przelewy24 zwraca status 0 – transakcja nie została zrealizowana (np. anulowana)
+            if (paymentData.data && paymentData.data.status === 0) {
+              console.log('❌ Płatność nieudana/anulowana (status 0) – zwracam redirect na stronę błędu.');
+              const errorResponse = {
+                ...reservation,
+                paymentError: true,
+                redirectTo: `/rezerwacja-error/${reservation.token}`
+              };
+              return res.json(errorResponse);
+            }
+
+            // Inne stany – nie traktuj automatycznie jako błąd (może być w toku). Zwróć rezerwację bez redirectu.
+            console.log('ℹ️ Płatność nie jest potwierdzona i nie jest status 0 (wartość:', paymentData.data?.status, '). Zwracam rezerwację bez redirectu.');
             return res.json(reservation);
           }
         } else {
