@@ -3406,3 +3406,14 @@ app.listen(PORT, '0.0.0.0', async () => {
   setInterval(checkPaymentStatuses, 5000); // 5000ms = 5 sekund
   console.log('Timer płatności uruchomiony (sprawdzanie co 5 sekund)');
 });
+
+// GET /api/my-ip – zwróć aktualny publiczny IP serwera
+app.get('/api/my-ip', async (req, res) => {
+  try {
+    const response = await fetch('https://api.ipify.org?format=json');
+    const data = await response.json();
+    res.json({ ip: data.ip, timestamp: new Date().toISOString() });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
