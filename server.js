@@ -434,16 +434,16 @@ async function checkAndUpdateReservationStatuses() {
       }
     }
     
-    // KROK 2: Sprawdź rezerwacje "platnosc_w_toku" starsze niż 310 sekund od zmiany statusu (dokładnie 5 minut i 10 sekund)
+    // KROK 2: Sprawdź rezerwacje "platnosc_w_toku" starsze niż 330 sekund od zmiany statusu (dokładnie 5 minut i 30 sekund)
     const [paymentInProgressExpired] = await dbPool.query(`
       SELECT id, spot_id, date, end_date, status, created_at, updated_at, payment_id,
              TIMESTAMPDIFF(SECOND, updated_at, NOW()) as seconds_old
       FROM reservations 
       WHERE status = 'platnosc_w_toku' 
-      AND TIMESTAMPDIFF(SECOND, updated_at, NOW()) >= 310
+      AND TIMESTAMPDIFF(SECOND, updated_at, NOW()) >= 330
     `);
     
-    console.log('🔍 DEBUG PŁATNOŚĆ W TOKU - ZNALEZIONE WYGASŁE REZERWACJE (5min 10s):', paymentInProgressExpired.length);
+    console.log('🔍 DEBUG PŁATNOŚĆ W TOKU - ZNALEZIONE WYGASŁE REZERWACJE (5min 30s):', paymentInProgressExpired.length);
     
     // Debug: pokaż szczegóły każdej rezerwacji "platnosc_w_toku"
     for (const res of paymentInProgressExpired) {
@@ -455,7 +455,7 @@ async function checkAndUpdateReservationStatuses() {
     }
     
     if (paymentInProgressExpired.length > 0) {
-      console.log(`🔍 DEBUG PŁATNOŚĆ W TOKU - Znaleziono ${paymentInProgressExpired.length} rezerwacji do sprawdzenia płatności (5min 10s)`);
+      console.log(`🔍 DEBUG PŁATNOŚĆ W TOKU - Znaleziono ${paymentInProgressExpired.length} rezerwacji do sprawdzenia płatności (5min 30s)`);
       
       for (const reservation of paymentInProgressExpired) {
         console.log(`🔍 DEBUG PŁATNOŚĆ W TOKU - Sprawdzam płatność dla rezerwacji ${reservation.id}:`);
@@ -464,7 +464,7 @@ async function checkAndUpdateReservationStatuses() {
         
         let paymentStatus = 'nieoplacona'; // domyślnie nieopłacona
         
-        // Dla rezerwacji starszych niż 310 sekund (5 minut i 10 sekund) od zmiany statusu - ustaw status "nieoplacona" (timer płatności już sprawdził płatności)
+        // Dla rezerwacji starszych niż 330 sekund (5 minut i 30 sekund) od zmiany statusu - ustaw status "nieoplacona" (timer płatności już sprawdził płatności)
         paymentStatus = 'nieoplacona';
         
         // Zmień status na finalny status
@@ -1233,6 +1233,27 @@ app.get('/api/reservations', async (req, res) => {
   } catch (err) {
     console.error('❌ Błąd w /api/reservations:', err.message);
     res.status(503).json({ error: err.message });
+  }
+});
+
+// Zwraca aktualny czas serwera/DB do synchronizacji zegara na froncie
+app.get('/api/reservations/time', async (req, res) => {
+  try {
+    const dbPool = await checkDatabaseConnection();
+    if (dbPool) {
+      try {
+        const [rows] = await dbPool.query('SELECT (UNIX_TIMESTAMP(NOW(3)) * 1000) AS now_ms');
+        const nowMs = Math.round(rows[0]?.now_ms ?? Date.now());
+        return res.json({ serverNowMs: nowMs });
+      } catch (dbErr) {
+        // Fallback do czasu procesu
+        return res.json({ serverNowMs: Date.now() });
+      }
+    }
+    // Jeśli brak połączenia z DB, zwróć czas procesu serwera
+    return res.json({ serverNowMs: Date.now() });
+  } catch (err) {
+    return res.json({ serverNowMs: Date.now() });
   }
 });
 
@@ -3391,7 +3412,7 @@ app.listen(PORT, '0.0.0.0', async () => {
   setInterval(checkAndUpdateReservationStatuses, 1000); // 1000ms = 1 sekunda
   console.log('⏰ Timer statusów rezerwacji uruchomiony (sprawdzanie co 1 sekundę)');
   console.log('🔧 DEBUG - Timer główny będzie sprawdzał rezerwacje co 1 sekundę');
-  console.log('📋 NOWE CZASY: oczekująca=15min, platnosc_w_toku=5min10s, P24=5min');
+  console.log('📋 NOWE CZASY: oczekująca=15min, platnosc_w_toku=5min30s, P24=5min');
   
   // Uruchom timer do sprawdzania płatności co 5 sekund
   setInterval(checkPaymentStatuses, 5000); // 5000ms = 5 sekund
