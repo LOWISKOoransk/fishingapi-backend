@@ -37,15 +37,19 @@ async function testEmailSending() {
 // Uruchom test przy starcie
 testEmailSending();
 
-// Konfiguracja Przelewy24 (testowe dane)
+// Konfiguracja Przelewy24 – sekrety pobierane z ENV (NIE commituj prawdziwych kluczy)
 const P24_CONFIG = {
-  merchantId: 353899, // Zmienione na number
-  posId: 353899, // Zmienione na number
-  apiKey: 'c87d5e5e', // Klucz do zamówień z sandboxa
-  crc: '7b524bd130131923', // Klucz do CRC z sandboxa
-  reportKey: '8ba2af407cdcea7d7a3e7e90cd404389', // Klucz do raportów (secretId)
-  sandbox: true,
-  baseUrl: 'https://sandbox.przelewy24.pl/api/v1' // Poprawne base URL dla sandbox API
+  merchantId: Number(process.env.P24_MERCHANT_ID),
+  posId: Number(process.env.P24_POS_ID),
+  apiKey: process.env.P24_API_KEY,
+  crc: process.env.P24_CRC,
+  // SecretId (alias reportKey) – używany do Basic Auth w raportach/verify
+  reportKey: process.env.P24_SECRET_ID || process.env.P24_REPORT_KEY,
+  secretId: process.env.P24_SECRET_ID || process.env.P24_REPORT_KEY,
+  sandbox: String(process.env.P24_SANDBOX).toLowerCase() === 'true' ? true : false,
+  baseUrl: process.env.P24_BASE_URL || (String(process.env.P24_SANDBOX).toLowerCase() === 'true'
+    ? 'https://sandbox.przelewy24.pl/api/v1'
+    : 'https://secure.przelewy24.pl/api/v1')
 };
 
 // Konfiguracja domen
