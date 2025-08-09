@@ -1323,55 +1323,81 @@ app.get('/api/reservations/token/:token', async (req, res) => {
           // Sprawdź czy płatność została zrealizowana
           // Status 1 = udana płatność, Status 0 = oczekująca
           if (paymentData.data && paymentData.data.status === 1) { // 1 = udana płatność
-            console.log('✅ Płatność potwierdzona! Zmieniam status na "opłacona"');
-            
-            // Zmień status na "opłacona" (tylko jeśli nie jest już opłacona)
-            if (reservation.status !== 'opłacona') {
-              await dbPool.query('UPDATE reservations SET status = ?, updated_at = NOW() WHERE id = ?', ['opłacona', reservation.id]);
-              
-              // Zmień source blokad z 'reservation' na 'paid_reservation' (rezerwacja potwierdzona)
-              const startDate = formatDateForDisplay(reservation.date);
-              const endDate = formatDateForDisplay(reservation.end_date);
-              
-              // Generuj wszystkie dni w zakresie rezerwacji (w lokalnej strefie czasowej)
-              // NIE blokuj dnia wyjazdu (end_date) - to dzień wyjazdu o 10:00
-              const blockDates = [];
-              let currentDate = new Date(startDate + 'T00:00:00');
-              const endDateObj = new Date(endDate + 'T00:00:00');
-              while (currentDate < endDateObj) { // Zmienione z <= na < - nie blokuj dnia wyjazdu
-                // Użyj toLocaleDateString zamiast toISOString aby zachować lokalną strefę czasową
-                const dateStr = currentDate.toLocaleDateString('en-CA'); // YYYY-MM-DD format
-                blockDates.push(dateStr);
-                currentDate.setDate(currentDate.getDate() + 1);
+            console.log('✅ Płatność potwierdzona przez status=1 – weryfikuję kwotę i transakcję');
+
+            // Utwardzenie: sprawdź zgodność kwoty i wykonaj verify
+            const expectedAmount = Math.round(Number(reservation.amount || 0) * 100);
+            const reportedAmount = Number(
+              (paymentData?.data?.amount ?? paymentData?.data?.originAmount ?? NaN)
+            );
+            const orderIdCandidate = paymentData?.data?.orderId ?? paymentData?.data?.order_id ?? null;
+
+            let verified = false;
+            if (Number.isFinite(reportedAmount) && reportedAmount === expectedAmount && orderIdCandidate) {
+              try {
+                const verificationResult = await verifyTransaction(
+                  reservation.payment_id,
+                  orderIdCandidate,
+                  expectedAmount,
+                  paymentData?.data?.currency || 'PLN'
+                );
+                verified = verificationResult?.data?.status === 'success';
+              } catch (e) {
+                console.error('❌ Błąd verifyTransaction (token endpoint):', e);
               }
-              
-              // Usuń stare blokady z source 'reservation' i dodaj nowe z source 'paid_reservation'
-              for (const blockDate of blockDates) {
-                try {
-                  // Usuń starą blokadę
-                  await dbPool.query(
-                    'DELETE FROM spot_blocks WHERE spot_id = ? AND date = ? AND source = ?',
-                    [reservation.spot_id, blockDate, 'reservation']
-                  );
-                  
-                  // Dodaj nową blokadę z source 'paid_reservation'
-                  await dbPool.query(
-                    'INSERT INTO spot_blocks (spot_id, date, source) VALUES (?, ?, ?)',
-                    [reservation.spot_id, blockDate, 'paid_reservation']
-                  );
-                } catch (error) {
-                  console.error(`❌ Błąd podczas zmiany source blokady:`, error);
-                }
-              }
-              
-              // Wyślij email z potwierdzeniem
-              await sendPaymentConfirmationEmail(reservation);
+            } else {
+              console.warn('⚠️ Brak zgodnej kwoty lub orderId – nie ustawiam "opłacona" (token endpoint).', { expectedAmount, reportedAmount, hasOrderId: !!orderIdCandidate });
             }
-            
-            // Pobierz zaktualizowaną rezerwację
-            const [updatedRows] = await dbPool.query('SELECT * FROM reservations WHERE id = ?', [reservation.id]);
-            console.log('✅ Zwracam zaktualizowaną rezerwację ze statusem "opłacona"');
-            return res.json(updatedRows[0]);
+
+            if (verified) {
+              // Zmień status na "opłacona" (tylko jeśli nie jest już opłacona)
+              if (reservation.status !== 'opłacona') {
+                await dbPool.query('UPDATE reservations SET status = ?, updated_at = NOW() WHERE id = ?', ['opłacona', reservation.id]);
+                
+                // Zmień source blokad z 'reservation' na 'paid_reservation' (rezerwacja potwierdzona)
+                const startDate = formatDateForDisplay(reservation.date);
+                const endDate = formatDateForDisplay(reservation.end_date);
+                
+                // Generuj wszystkie dni w zakresie rezerwacji (w lokalnej strefie czasowej)
+                // NIE blokuj dnia wyjazdu (end_date) - to dzień wyjazdu o 10:00
+                const blockDates = [];
+                let currentDate = new Date(startDate + 'T00:00:00');
+                const endDateObj = new Date(endDate + 'T00:00:00');
+                while (currentDate < endDateObj) { // Zmienione z <= na < - nie blokuj dnia wyjazdu
+                  // Użyj toLocaleDateString zamiast toISOString aby zachować lokalną strefę czasową
+                  const dateStr = currentDate.toLocaleDateString('en-CA'); // YYYY-MM-DD format
+                  blockDates.push(dateStr);
+                  currentDate.setDate(currentDate.getDate() + 1);
+                }
+                
+                // Usuń stare blokady z source 'reservation' i dodaj nowe z source 'paid_reservation'
+                for (const blockDate of blockDates) {
+                  try {
+                    // Usuń starą blokadę
+                    await dbPool.query(
+                      'DELETE FROM spot_blocks WHERE spot_id = ? AND date = ? AND source = ?',
+                      [reservation.spot_id, blockDate, 'reservation']
+                    );
+                    
+                    // Dodaj nową blokadę z source 'paid_reservation'
+                    await dbPool.query(
+                      'INSERT INTO spot_blocks (spot_id, date, source) VALUES (?, ?, ?)',
+                      [reservation.spot_id, blockDate, 'paid_reservation']
+                    );
+                  } catch (error) {
+                    console.error(`❌ Błąd podczas zmiany source blokady:`, error);
+                  }
+                }
+                
+                // Wyślij email z potwierdzeniem
+                await sendPaymentConfirmationEmail(reservation);
+              }
+              
+              // Pobierz zaktualizowaną rezerwację
+              const [updatedRows] = await dbPool.query('SELECT * FROM reservations WHERE id = ?', [reservation.id]);
+              console.log('✅ Zwracam zaktualizowaną rezerwację ze statusem "opłacona"');
+              return res.json(updatedRows[0]);
+            }
           } else {
             // Jeśli Przelewy24 zwraca status 0 – transakcja nie została zrealizowana (np. anulowana)
             if (paymentData.data && paymentData.data.status === 0) {
@@ -2649,62 +2675,88 @@ app.get('/api/rezerwacja/:token', async (req, res) => {
           // Sprawdź czy płatność została zrealizowana
           // Status 1 = udana płatność, Status 0 = oczekująca
           if (paymentData.data && paymentData.data.status === 1) { // 1 = udana płatność
-            console.log('✅ Płatność potwierdzona! Zmieniam status na "opłacona"');
+            console.log('✅ Płatność potwierdzona przez status=1 – weryfikuję kwotę i transakcję (return endpoint)');
             
-            // Zmień status na "opłacona"
-            await dbPool.query('UPDATE reservations SET status = ?, updated_at = NOW() WHERE id = ?', ['opłacona', reservation.id]);
-            
-            // Zmień source blokad z 'reservation' na 'paid_reservation' (rezerwacja potwierdzona)
-            const startDate = new Date(reservation.date);
-            const endDate = new Date(reservation.end_date);
-            
-            // Generuj wszystkie dni w zakresie rezerwacji (w lokalnej strefie czasowej)
-        const blockDates = [];
-        let currentDate = new Date(startDate + 'T00:00:00');
-        const endDateObj = new Date(endDate + 'T00:00:00');
-        while (currentDate < endDateObj) { // Zmienione z <= na < - nie blokuj dnia wyjazdu
-              // Użyj toLocaleDateString zamiast toISOString aby zachować lokalną strefę czasową
-              const dateStr = currentDate.toLocaleDateString('en-CA'); // YYYY-MM-DD format
-          blockDates.push(dateStr);
-          currentDate.setDate(currentDate.getDate() + 1);
-        }
-        
-            // Usuń stare blokady z source 'reservation' i dodaj nowe z source 'paid_reservation'
-        for (const blockDate of blockDates) {
-          try {
-                // Usuń starą blokadę
-            await dbPool.query(
-              'DELETE FROM spot_blocks WHERE spot_id = ? AND date = ? AND source = ?',
-                  [reservation.spot_id, blockDate, 'reservation']
+            // Utwardzenie: sprawdź zgodność kwoty i wykonaj verify
+            const expectedAmount = Math.round(Number(reservation.amount || 0) * 100);
+            const reportedAmount = Number(
+              (paymentData?.data?.amount ?? paymentData?.data?.originAmount ?? NaN)
+            );
+            const orderIdCandidate = paymentData?.data?.orderId ?? paymentData?.data?.order_id ?? null;
+
+            let verified = false;
+            if (Number.isFinite(reportedAmount) && reportedAmount === expectedAmount && orderIdCandidate) {
+              try {
+                const verificationResult = await verifyTransaction(
+                  reservation.payment_id,
+                  orderIdCandidate,
+                  expectedAmount,
+                  paymentData?.data?.currency || 'PLN'
                 );
-                
-                // Dodaj nową blokadę z source 'paid_reservation'
-                await dbPool.query(
-                  'INSERT INTO spot_blocks (spot_id, date, source) VALUES (?, ?, ?)',
-                  [reservation.spot_id, blockDate, 'paid_reservation']
-                );
-                
-                console.log(`✅ Zmieniono source blokady: stanowisko ${reservation.spot_id}, data ${blockDate}, source: paid_reservation`);
-          } catch (error) {
-                console.error(`❌ Błąd podczas zmiany source blokady:`, error);
+                verified = verificationResult?.data?.status === 'success';
+              } catch (e) {
+                console.error('❌ Błąd verifyTransaction (return endpoint):', e);
               }
+            } else {
+              console.warn('⚠️ Brak zgodnej kwoty lub orderId – nie ustawiam "opłacona" (return endpoint).', { expectedAmount, reportedAmount, hasOrderId: !!orderIdCandidate });
             }
-            
-            console.log(`✅ Zmieniono source ${blockDates.length} blokad dla rezerwacji ${reservation.id} na 'paid_reservation'`);
-            
-            // Wyślij email z potwierdzeniem
-            await sendPaymentConfirmationEmail(reservation);
-            
-            return res.json({
-              success: true,
-              message: 'Płatność potwierdzona! Status rezerwacji zmieniony na "opłacona"',
-              reservation: {
-                id: reservation.id,
-                status: 'opłacona',
-                payment_id: reservation.payment_id,
-                amount: reservation.amount
+
+            if (verified) {
+              // Zmień status na "opłacona"
+              await dbPool.query('UPDATE reservations SET status = ?, updated_at = NOW() WHERE id = ?', ['opłacona', reservation.id]);
+              
+              // Zmień source blokad z 'reservation' na 'paid_reservation' (rezerwacja potwierdzona)
+              const startDate = new Date(reservation.date);
+              const endDate = new Date(reservation.end_date);
+              
+              // Generuj wszystkie dni w zakresie rezerwacji (w lokalnej strefie czasowej)
+              const blockDates = [];
+              let currentDate = new Date(startDate + 'T00:00:00');
+              const endDateObj = new Date(endDate + 'T00:00:00');
+              while (currentDate < endDateObj) { // Zmienione z <= na < - nie blokuj dnia wyjazdu
+                // Użyj toLocaleDateString zamiast toISOString aby zachować lokalną strefę czasową
+                const dateStr = currentDate.toLocaleDateString('en-CA'); // YYYY-MM-DD format
+                blockDates.push(dateStr);
+                currentDate.setDate(currentDate.getDate() + 1);
               }
-            });
+              
+              // Usuń stare blokady z source 'reservation' i dodaj nowe z source 'paid_reservation'
+              for (const blockDate of blockDates) {
+                try {
+                  // Usuń starą blokadę
+                  await dbPool.query(
+                    'DELETE FROM spot_blocks WHERE spot_id = ? AND date = ? AND source = ?',
+                    [reservation.spot_id, blockDate, 'reservation']
+                  );
+                  
+                  // Dodaj nową blokadę z source 'paid_reservation'
+                  await dbPool.query(
+                    'INSERT INTO spot_blocks (spot_id, date, source) VALUES (?, ?, ?)',
+                    [reservation.spot_id, blockDate, 'paid_reservation']
+                  );
+                  
+                  console.log(`✅ Zmieniono source blokady: stanowisko ${reservation.spot_id}, data ${blockDate}, source: paid_reservation`);
+                } catch (error) {
+                  console.error(`❌ Błąd podczas zmiany source blokady:`, error);
+                }
+              }
+              
+              console.log(`✅ Zmieniono source ${blockDates.length} blokad dla rezerwacji ${reservation.id} na 'paid_reservation'`);
+              
+              // Wyślij email z potwierdzeniem
+              await sendPaymentConfirmationEmail(reservation);
+              
+              return res.json({
+                success: true,
+                message: 'Płatność potwierdzona! Status rezerwacji zmieniony na "opłacona"',
+                reservation: {
+                  id: reservation.id,
+                  status: 'opłacona',
+                  payment_id: reservation.payment_id,
+                  amount: reservation.amount
+                }
+              });
+            }
           } else {
             console.log('❌ Płatność nie została zrealizowana (status:', paymentData.data?.status, ')');
             return res.json({
@@ -3245,63 +3297,89 @@ app.get('/api/reservation/status/:token', async (req, res) => {
           
           // Sprawdź czy transakcja została ukończona
           if (paymentData.data && paymentData.data.status === 1) { // 1 = completed
-            console.log('✅ Polling - Transakcja ukończona! Zmieniam status na "opłacona"');
-            
-            // Zmień status na "opłacona" (tylko jeśli nie jest już opłacona)
-            if (reservation.status !== 'opłacona') {
-              console.log('💾 Aktualizuję status w bazie z', reservation.status, 'na opłacona');
-                await dbPool.query(
-                'UPDATE reservations SET status = ?, updated_at = NOW() WHERE id = ?',
-                ['opłacona', reservation.id]
-              );
-              
-              // Zmień source blokad z 'reservation' na 'paid_reservation' (rezerwacja potwierdzona)
-              const startDate = formatDateForDisplay(reservation.date);
-              const endDate = formatDateForDisplay(reservation.end_date);
-              
-              // Generuj wszystkie dni w zakresie rezerwacji (w lokalnej strefie czasowej)
-              const blockDates = [];
-              let currentDate = new Date(startDate + 'T00:00:00');
-              const endDateObj = new Date(endDate + 'T00:00:00');
-              while (currentDate < endDateObj) { // Zmienione z <= na < - nie blokuj dnia wyjazdu
-                // Użyj toLocaleDateString zamiast toISOString aby zachować lokalną strefę czasową
-                const dateStr = currentDate.toLocaleDateString('en-CA'); // YYYY-MM-DD format
-                blockDates.push(dateStr);
-                currentDate.setDate(currentDate.getDate() + 1);
+            console.log('✅ Polling - Transakcja ukończona przez status=1 – weryfikuję kwotę i verify');
+
+            // Utwardzenie: sprawdź zgodność kwoty i wykonaj verify
+            const expectedAmount = Math.round(Number(reservation.amount || 0) * 100);
+            const reportedAmount = Number(
+              (paymentData?.data?.amount ?? paymentData?.data?.originAmount ?? NaN)
+            );
+            const orderIdCandidate = paymentData?.data?.orderId ?? paymentData?.data?.order_id ?? null;
+
+            let verified = false;
+            if (Number.isFinite(reportedAmount) && reportedAmount === expectedAmount && orderIdCandidate) {
+              try {
+                const verificationResult = await verifyTransaction(
+                  reservation.payment_id,
+                  orderIdCandidate,
+                  expectedAmount,
+                  paymentData?.data?.currency || 'PLN'
+                );
+                verified = verificationResult?.data?.status === 'success';
+              } catch (e) {
+                console.error('❌ Polling - Błąd verifyTransaction:', e);
               }
-              
-              // Usuń stare blokady z source 'reservation' i dodaj nowe z source 'paid_reservation'
-              for (const blockDate of blockDates) {
-                try {
-                  // Usuń starą blokadę
-                  await dbPool.query(
-                    'DELETE FROM spot_blocks WHERE spot_id = ? AND date = ? AND source = ?',
-                    [reservation.spot_id, blockDate, 'reservation']
-                  );
-                  
-                  // Dodaj nową blokadę z source 'paid_reservation'
-                  await dbPool.query(
-                    'INSERT INTO spot_blocks (spot_id, date, source) VALUES (?, ?, ?)',
-                    [reservation.spot_id, blockDate, 'paid_reservation']
-                  );
-                  
-                  console.log(`✅ Polling - Zmieniono source blokady: stanowisko ${reservation.spot_id}, data ${blockDate}, source: paid_reservation`);
-                } catch (error) {
-                  console.error(`❌ Polling - Błąd podczas zmiany source blokady:`, error);
-                }
-              }
-              
-              console.log(`✅ Polling - Zmieniono source ${blockDates.length} blokad dla rezerwacji ${reservation.id} na 'paid_reservation'`);
-              
-              // Wyślij email z potwierdzeniem
-              await sendPaymentConfirmationEmail(reservation);
+            } else {
+              console.warn('⚠️ Polling - Brak zgodnej kwoty lub orderId – nie ustawiam "opłacona".', { expectedAmount, reportedAmount, hasOrderId: !!orderIdCandidate });
             }
-            
-            // Pobierz zaktualizowaną rezerwację
-            const [updatedRows] = await dbPool.query('SELECT * FROM reservations WHERE id = ?', [reservation.id]);
-            console.log('✅ Polling - Zwracam zaktualizowaną rezerwację ze statusem "opłacona"');
-            clearTimeout(timeout);
-            return res.json(updatedRows[0]);
+
+            if (verified) {
+              // Zmień status na "opłacona" (tylko jeśli nie jest już opłacona)
+              if (reservation.status !== 'opłacona') {
+                console.log('💾 Polling - Aktualizuję status w bazie z', reservation.status, 'na opłacona');
+                  await dbPool.query(
+                  'UPDATE reservations SET status = ?, updated_at = NOW() WHERE id = ?',
+                  ['opłacona', reservation.id]
+                );
+                
+                // Zmień source blokad z 'reservation' na 'paid_reservation' (rezerwacja potwierdzona)
+                const startDate = formatDateForDisplay(reservation.date);
+                const endDate = formatDateForDisplay(reservation.end_date);
+                
+                // Generuj wszystkie dni w zakresie rezerwacji (w lokalnej strefie czasowej)
+                const blockDates = [];
+                let currentDate = new Date(startDate + 'T00:00:00');
+                const endDateObj = new Date(endDate + 'T00:00:00');
+                while (currentDate < endDateObj) { // Zmienione z <= na < - nie blokuj dnia wyjazdu
+                  // Użyj toLocaleDateString zamiast toISOString aby zachować lokalną strefę czasową
+                  const dateStr = currentDate.toLocaleDateString('en-CA'); // YYYY-MM-DD format
+                  blockDates.push(dateStr);
+                  currentDate.setDate(currentDate.getDate() + 1);
+                }
+                
+                // Usuń stare blokady z source 'reservation' i dodaj nowe z source 'paid_reservation'
+                for (const blockDate of blockDates) {
+                  try {
+                    // Usuń starą blokadę
+                    await dbPool.query(
+                      'DELETE FROM spot_blocks WHERE spot_id = ? AND date = ? AND source = ?',
+                      [reservation.spot_id, blockDate, 'reservation']
+                    );
+                    
+                    // Dodaj nową blokadę z source 'paid_reservation'
+                    await dbPool.query(
+                      'INSERT INTO spot_blocks (spot_id, date, source) VALUES (?, ?, ?)',
+                      [reservation.spot_id, blockDate, 'paid_reservation']
+                    );
+                    
+                    console.log(`✅ Polling - Zmieniono source blokady: stanowisko ${reservation.spot_id}, data ${blockDate}, source: paid_reservation`);
+                  } catch (error) {
+                    console.error(`❌ Polling - Błąd podczas zmiany source blokady:`, error);
+                  }
+                }
+                
+                console.log(`✅ Polling - Zmieniono source ${blockDates.length} blokad dla rezerwacji ${reservation.id} na 'paid_reservation'`);
+                
+                // Wyślij email z potwierdzeniem
+                await sendPaymentConfirmationEmail(reservation);
+              }
+              
+              // Pobierz zaktualizowaną rezerwację
+              const [updatedRows] = await dbPool.query('SELECT * FROM reservations WHERE id = ?', [reservation.id]);
+              console.log('✅ Polling - Zwracam zaktualizowaną rezerwację ze statusem "opłacona"');
+              clearTimeout(timeout);
+              return res.json(updatedRows[0]);
+            }
           } else {
             console.log('❌ Polling - Płatność nie została zrealizowana (status:', paymentData.data?.status, ')');
           }
