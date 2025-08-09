@@ -52,6 +52,14 @@ const P24_CONFIG = {
     : 'https://secure.przelewy24.pl/api/v1')
 };
 
+// Pomocnicza funkcja do budowy URL przekierowania do bramki P24
+function getP24RedirectUrl(paymentToken) {
+  const host = P24_CONFIG.sandbox
+    ? 'https://sandbox.przelewy24.pl'
+    : 'https://secure.przelewy24.pl';
+  return `${host}/trnRequest/${paymentToken}`;
+}
+
 // Konfiguracja domen
 const DOMAIN_CONFIG = {
   frontend: process.env.FRONTEND_URL || 'https://lowiskomlynransk.pl',
@@ -2507,10 +2515,11 @@ app.post('/api/create-payment', async (req, res) => {
       
       console.log('✅ Tokeny zapisane pomyślnie');
     
+    const paymentUrl = getP24RedirectUrl(data.data.token);
     res.json({
         success: true,
         token: data.data.token,
-        paymentUrl: `https://sandbox.przelewy24.pl/trnRequest/${data.data.token}`
+        paymentUrl
       });
     } else {
       console.log('❌ Brak tokenu w odpowiedzi:', data);
