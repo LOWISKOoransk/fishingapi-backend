@@ -635,7 +635,7 @@ async function sendReservationEmail(reservation) {
           <p><strong>Okres pobytu:</strong> ${new Date(reservation.date).toLocaleDateString('pl-PL')} - ${new Date(reservation.end_date).toLocaleDateString('pl-PL')} (${getDurationText(reservation.date, reservation.end_date)})</p>
           <p><strong>Kwota:</strong> ${amount.toFixed(2)} zł</p>
           <br>
-          <p><strong>Dane podatnika:</strong></p>
+          <p><strong>Dane sprzedawcy:</strong></p>
           <p>Artur Ropiak</p>
           <p>NIP: 7451275665</p>
         </div>
@@ -710,7 +710,7 @@ async function sendPaymentConfirmationEmail(reservation) {
           <p><strong>Okres pobytu:</strong> ${new Date(reservation.date).toLocaleDateString('pl-PL')} - ${new Date(reservation.end_date).toLocaleDateString('pl-PL')} (${getDurationText(reservation.date, reservation.end_date)})</p>
           <p><strong>Kwota:</strong> ${amount.toFixed(2)} zł</p>
           <br>
-          <p><strong>Dane podatnika:</strong></p>
+          <p><strong>Dane sprzedawcy:</strong></p>
           <p>Artur Ropiak</p>
           <p>NIP: 7451275665</p>
         </div>
@@ -799,7 +799,7 @@ async function sendReservationCancellationEmail(reservation) {
           <p><strong>Okres pobytu:</strong> ${new Date(reservation.date).toLocaleDateString('pl-PL')} - ${new Date(reservation.end_date).toLocaleDateString('pl-PL')} (${getDurationText(reservation.date, reservation.end_date)})</p>
           <p><strong>Kwota:</strong> ${amount.toFixed(2)} zł</p>
           <br>
-          <p><strong>Dane podatnika:</strong></p>
+          <p><strong>Dane sprzedawcy:</strong></p>
           <p>Artur Ropiak</p>
           <p>NIP: 7451275665</p>
         </div>
@@ -886,7 +886,7 @@ async function sendRefundRequestedEmail(reservation) {
         
         <div style="background-color: #fef3c7; padding: 15px; border-radius: 8px; margin: 20px; border-left: 4px solid #f59e0b;">
           <p style="color: #92400e; font-size: 14px; margin: 0;">
-            <strong>Dane podatnika:</strong><br>
+            <strong>Dane sprzedawcy:</strong><br>
             Artur Ropiak<br>
             NIP: 7451275665
           </p>
@@ -950,7 +950,7 @@ async function sendAdminCancellationEmail(reservation) {
         
         <div style="background-color: #fef3c7; padding: 15px; border-radius: 8px; margin: 20px; border-left: 4px solid #f59e0b;">
           <p style="color: #92400e; font-size: 14px; margin: 0;">
-            <strong>Dane podatnika:</strong><br>
+            <strong>Dane sprzedawcy:</strong><br>
             Artur Ropiak<br>
             NIP: 7451275665
           </p>
@@ -1014,7 +1014,7 @@ async function sendRefundCompletedEmail(reservation) {
         
         <div style="background-color: #fef3c7; padding: 15px; border-radius: 8px; margin: 20px; border-left: 4px solid #f59e0b;">
           <p style="color: #92400e; font-size: 14px; margin: 0;">
-            <strong>Dane podatnika:</strong><br>
+            <strong>Dane sprzedawcy:</strong><br>
             Artur Ropiak<br>
             NIP: 7451275665
           </p>
@@ -1078,7 +1078,7 @@ async function sendAdminRefundCompletedEmail(reservation) {
         
         <div style="background-color: #fef3c7; padding: 15px; border-radius: 8px; margin: 20px; border-left: 4px solid #f59e0b;">
           <p style="color: #92400e; font-size: 14px; margin: 0;">
-            <strong>Dane podatnika:</strong><br>
+            <strong>Dane sprzedawcy:</strong><br>
             Artur Ropiak<br>
             NIP: 7451275665
           </p>
