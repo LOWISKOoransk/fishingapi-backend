@@ -8,8 +8,12 @@ const { Resend } = require('resend');
 const crypto = require('crypto');
 const axios = require('axios');
 
-// Inicjalizacja Resend
-const resend = new Resend(process.env.RESEND_API_KEY || 're_fdKaJfQg_3rWdH2HSo9uoi33itgoGeU3s');
+// Inicjalizacja Resend (wymaga RESEND_API_KEY w env)
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+if (!RESEND_API_KEY) {
+  console.warn('⚠️ Brak RESEND_API_KEY w zmiennych środowiskowych. Wysyłka e-maili nie zadziała.');
+}
+const resend = new Resend(RESEND_API_KEY || '');
 // Nadawca e-maili (statyczny, z możliwością nadpisania zmienną środowiskową)
 const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'rezerwacje@xn--rask-c2a.pl';
 
