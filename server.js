@@ -218,7 +218,7 @@ async function createP24Payment(reservation, amount) {
     sessionId: sessionId,
     amount: amountInGrosz,
     currency: 'PLN',
-          description: `Łowisko Młyn Rańsk - Rezerwacja stanowiska ${reservation.spot_id} na czas ${getDurationText(reservation.date, reservation.end_date)} - ${reservation.first_name} ${reservation.last_name}`,
+          description: `Rezerwacja ID: ${reservation.id} - Stanowisko ${reservation.spot_id} - ${new Date(reservation.date).toLocaleDateString('pl-PL')}`,
     email: reservation.email,
     country: 'PL',
     urlReturn: `${DOMAIN_CONFIG.frontend}/payment/return/${reservation.token}?fromPayment=true`,
@@ -2938,7 +2938,7 @@ app.post('/api/reservations/:id/payment', async (req, res) => {
     res.json({
       paymentId: sessionId,
       amount: paymentAmount,
-                description: `Łowisko Młyn Rańsk - Rezerwacja stanowiska ${resv.spot_id} na czas ${getDurationText(resv.date, resv.end_date)} - ${resv.first_name} ${resv.last_name}`,
+                description: `Rezerwacja ID: ${resv.id} - Stanowisko ${resv.spot_id} - ${new Date(resv.date).toLocaleDateString('pl-PL')}`,
       paymentUrl: paymentUrl || `${P24_CONFIG.baseUrl}/trnRequest/${paymentToken}`
     });
   } catch (err) {
