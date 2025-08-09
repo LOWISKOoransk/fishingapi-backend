@@ -1096,16 +1096,28 @@ async function sendAdminRefundCompletedEmail(reservation) {
 const app = express();
 const PORT = process.env.PORT || 4000;
 
-// Konfiguracja CORS - pozwól na żądania z frontendu
+// Konfiguracja CORS - pozwól na żądania z frontendu (również www i lokalne)
+const allowedOrigins = [
+  DOMAIN_CONFIG.frontend,
+  DOMAIN_CONFIG.backend,
+  'https://lowiskomlynransk.pl',
+  'https://www.lowiskomlynransk.pl',
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'http://localhost:4000',
+];
+
 app.use(cors({
-  origin: [
-    DOMAIN_CONFIG.frontend, // Główna domena
-    DOMAIN_CONFIG.backend // Dodaj domenę Render
-  ],
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true); // pozwól na brak origin (np. mobilne webview)
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    console.warn('CORS: zablokowano origin:', origin);
+    return callback(new Error('CORS not allowed'));
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Origin', 'Accept'],
-  optionsSuccessStatus: 200 // Niektóre przeglądarki wymagają tego
+  optionsSuccessStatus: 200
 }));
 
 // Dodaj middleware do obsługi preflight requests
