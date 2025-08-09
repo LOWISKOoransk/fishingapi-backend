@@ -10,13 +10,15 @@ const axios = require('axios');
 
 // Inicjalizacja Resend
 const resend = new Resend(process.env.RESEND_API_KEY || 're_fdKaJfQg_3rWdH2HSo9uoi33itgoGeU3s');
+// Nadawca e-maili (statyczny, z możliwością nadpisania zmienną środowiskową)
+const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'rezerwacje@xn--rask-c2a.pl';
 
 // Test wysyłania emaila przy starcie serwera
 async function testEmailSending() {
   try {
     console.log('🧪 Testuję wysyłanie emaila...');
     await resend.emails.send({
-      from: `rezerwacje@${DOMAIN_CONFIG.frontend.replace('https://', '').replace('http://', '')}`,
+      from: RESEND_FROM_EMAIL,
       to: 'test@example.com',
       subject: 'Test email - Łowisko Młyn Rańsk',
       html: '<h1>Test email</h1><p>To jest test wysyłania emaila.</p>'
@@ -650,7 +652,7 @@ async function sendReservationEmail(reservation) {
 
     // Wysyłam email przez Resend
     await resend.emails.send({
-      from: `rezerwacje@${DOMAIN_CONFIG.frontend.replace('https://', '').replace('http://', '')}`,
+      from: RESEND_FROM_EMAIL,
       to: reservation.email,
       subject: 'Rezerwacja utworzona - czeka na płatność - Łowisko Młyn Rańsk',
       html: html
@@ -741,7 +743,7 @@ async function sendPaymentConfirmationEmail(reservation) {
     console.log(`DEBUG: Wysyłam email przez Resend do: ${reservation.email}`);
     // Wysyłam email przez Resend
     await resend.emails.send({
-      from: `rezerwacje@${DOMAIN_CONFIG.frontend.replace('https://', '').replace('http://', '')}`,
+      from: RESEND_FROM_EMAIL,
       to: reservation.email,
       subject: 'Rezerwacja potwierdzona - Łowisko Młyn Rańsk',
       html: html
@@ -823,7 +825,7 @@ async function sendReservationCancellationEmail(reservation) {
     console.log(`DEBUG: Wysyłam email przez Resend do: ${reservation.email}`);
     // Wysyłam email przez Resend
     await resend.emails.send({
-      from: `rezerwacje@${DOMAIN_CONFIG.frontend.replace('https://', '').replace('http://', '')}`,
+      from: RESEND_FROM_EMAIL,
       to: reservation.email,
       subject: 'Rezerwacja anulowana - Łowisko Młyn Rańsk',
       html: html
@@ -889,7 +891,7 @@ async function sendRefundRequestedEmail(reservation) {
     `;
 
     await resend.emails.send({
-      from: `rezerwacje@${DOMAIN_CONFIG.frontend.replace('https://', '').replace('http://', '')}`,
+      from: RESEND_FROM_EMAIL,
       to: reservation.email,
       subject: 'Zwrot zgłoszony - Łowisko Młyn Rańsk',
       html: html
@@ -953,7 +955,7 @@ async function sendAdminCancellationEmail(reservation) {
     `;
 
     await resend.emails.send({
-      from: `rezerwacje@${DOMAIN_CONFIG.frontend.replace('https://', '').replace('http://', '')}`,
+      from: RESEND_FROM_EMAIL,
       to: reservation.email,
       subject: 'Rezerwacja anulowana przez administratora - Łowisko Młyn Rańsk',
       html: html
@@ -1017,7 +1019,7 @@ async function sendRefundCompletedEmail(reservation) {
     `;
 
     await resend.emails.send({
-      from: `rezerwacje@${DOMAIN_CONFIG.frontend.replace('https://', '').replace('http://', '')}`,
+      from: RESEND_FROM_EMAIL,
       to: reservation.email,
       subject: 'Zwrot zrealizowany - Łowisko Młyn Rańsk',
       html: html
@@ -1081,7 +1083,7 @@ async function sendAdminRefundCompletedEmail(reservation) {
     `;
 
     await resend.emails.send({
-      from: `rezerwacje@${DOMAIN_CONFIG.frontend.replace('https://', '').replace('http://', '')}`,
+      from: RESEND_FROM_EMAIL,
       to: reservation.email,
       subject: 'Zwrot po anulacji zrealizowany - Łowisko Młyn Rańsk',
       html: html
