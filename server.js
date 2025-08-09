@@ -1405,7 +1405,7 @@ app.get('/api/reservations/token/:token', async (req, res) => {
               const errorResponse = {
                 ...reservation,
                 paymentError: true,
-                redirectTo: `/rezerwacja-error/${reservation.token}`
+                redirectTo: `/rezerwacja-error/${reservation.token}?fromPayment=true`
               };
               return res.json(errorResponse);
             }
@@ -1416,7 +1416,7 @@ app.get('/api/reservations/token/:token', async (req, res) => {
               const errorResponse = {
                 ...reservation,
                 paymentError: true,
-                redirectTo: `/rezerwacja-error/${reservation.token}`
+                redirectTo: `/rezerwacja-error/${reservation.token}?fromPayment=true`
               };
               return res.json(errorResponse);
             }
@@ -1436,7 +1436,7 @@ app.get('/api/reservations/token/:token', async (req, res) => {
             const errorResponse = {
               ...reservation,
               paymentError: true,
-              redirectTo: `/rezerwacja-error/${reservation.token}`
+              redirectTo: `/rezerwacja-error/${reservation.token}?fromPayment=true`
             };
             return res.json(errorResponse);
           }
@@ -1454,7 +1454,7 @@ app.get('/api/reservations/token/:token', async (req, res) => {
           const errorResponse = {
             ...reservation,
             paymentError: true,
-            redirectTo: `/rezerwacja-error/${reservation.token}`
+            redirectTo: `/rezerwacja-error/${reservation.token}?fromPayment=true`
           };
           return res.json(errorResponse);
         }
@@ -2762,7 +2762,7 @@ app.get('/api/rezerwacja/:token', async (req, res) => {
             return res.json({
               success: false,
               message: 'Płatność nie została zrealizowana',
-              redirectTo: `/rezerwacja-error/${reservation.token}`,
+            redirectTo: `/rezerwacja-error/${reservation.token}?fromPayment=true`,
               reservation: {
                 id: reservation.id,
                 status: reservation.status,
