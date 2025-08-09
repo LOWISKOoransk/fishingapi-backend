@@ -2952,7 +2952,7 @@ app.post('/api/reservations/:id/payment', async (req, res) => {
       paymentId: sessionId,
       amount: paymentAmount,
                 description: `Rezerwacja ID: ${resv.id} - Stanowisko ${resv.spot_id} - ${new Date(resv.date).toLocaleDateString('pl-PL')}`,
-      paymentUrl: paymentUrl || `${P24_CONFIG.baseUrl}/trnRequest/${paymentToken}`
+      paymentUrl: paymentUrl || getP24RedirectUrl(paymentToken)
     });
   } catch (err) {
     console.error('Błąd podczas inicjowania płatności:', err);
