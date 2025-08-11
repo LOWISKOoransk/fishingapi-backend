@@ -1,0 +1,246 @@
+warning: in the working copy of 'server.js', LF will be replaced by CRLF the next time Git touches it
+[1mdiff --git a/server.js b/server.js[m
+[1mindex 0206154..0b7c309 100644[m
+[1m--- a/server.js[m
+[1m+++ b/server.js[m
+[36m@@ -10,15 +10,22 @@[m [mconst axios = require('axios');[m
+ [m
+ // Inicjalizacja Resend (wymaga RESEND_API_KEY w env)[m
+ const RESEND_API_KEY = process.env.RESEND_API_KEY;[m
+[32m+[m[32mlet resend = null;[m
+ if (!RESEND_API_KEY) {[m
+   console.warn('⚠️ Brak RESEND_API_KEY w zmiennych środowiskowych. Wysyłka e-maili nie zadziała.');[m
+[32m+[m[32m} else {[m
+[32m+[m[32m  resend = new Resend(RESEND_API_KEY);[m
+ }[m
+[31m-const resend = new Resend(RESEND_API_KEY || '');[m
+ // Nadawca e-maili (statyczny, z możliwością nadpisania zmienną środowiskową)[m
+ const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'rezerwacje@xn--rask-c2a.pl';[m
+ [m
+ // Test wysyłania emaila przy starcie serwera[m
+ async function testEmailSending() {[m
+[32m+[m[32m  if (!resend) {[m
+[32m+[m[32m    console.log('⚠️ Pomijam test emaila - brak klucza API');[m
+[32m+[m[32m    return;[m
+[32m+[m[32m  }[m
+[32m+[m[41m  [m
+   try {[m
+     console.log('🧪 Testuję wysyłanie emaila...');[m
+     await resend.emails.send({[m
+[36m@@ -1245,6 +1252,144 @@[m [masync function checkDatabaseConnection() {[m
+ }[m
+ [m
+ // GET /api/spots – lista wszystkich stanowisk[m
+[32m+[m[32m// Middleware do weryfikacji tokenu administratora[m
+[32m+[m[32mconst verifyAdminToken = (req, res, next) => {[m
+[32m+[m[32m  const token = req.headers.authorization?.replace('Bearer ', '');[m
+[32m+[m[41m  [m
+[32m+[m[32m  if (!token) {[m
+[32m+[m[32m    console.log('❌ Próba dostępu bez tokenu autoryzacji');[m
+[32m+[m[32m    return res.status(401).json({[m
+[32m+[m[32m      success: false,[m
+[32m+[m[32m      message: 'Brak tokenu autoryzacji'[m
+[32m+[m[32m    });[m
+[32m+[m[32m  }[m
+[32m+[m[41m  [m
+[32m+[m[32m  try {[m
+[32m+[m[32m    // Dekoduj token (w produkcji użyj JWT)[m
+[32m+[m[32m    const decoded = Buffer.from(token, 'base64').toString();[m
+[32m+[m[32m    const [username, timestamp] = decoded.split(':');[m
+[32m+[m[41m    [m
+[32m+[m[32m    if (!username || !timestamp) {[m
+[32m+[m[32m      console.log('❌ Nieprawidłowy format tokenu');[m
+[32m+[m[32m      return res.status(401).json({[m
+[32m+[m[32m        success: false,[m
+[32m+[m[32m        message: 'Nieprawidłowy format tokenu'[m
+[32m+[m[32m      });[m
+[32m+[m[32m    }[m
+[32m+[m[41m    [m
+[32m+[m[32m    // Sprawdź czy token nie wygasł (24 godziny)[m
+[32m+[m[32m    const tokenAge = Date.now() - parseInt(timestamp);[m
+[32m+[m[32m    if (tokenAge > 24 * 60 * 60 * 1000) {[m
+[32m+[m[32m      console.log(`❌ Token wygasł dla użytkownika: ${username}`);[m
+[32m+[m[32m      return res.status(401).json({[m
+[32m+[m[32m        success: false,[m
+[32m+[m[32m        message: 'Token wygasł'[m
+[32m+[m[32m      });[m
+[32m+[m[32m    }[m
+[32m+[m[41m    [m
+[32m+[m[32m    // Sprawdź czy użytkownik to arturrek23[m
+[32m+[m[32m    if (username === 'arturrek23') {[m
+[32m+[m[32m      req.adminUser = { username };[m
+[32m+[m[32m      next();[m
+[32m+[m[32m    } else {[m
+[32m+[m[32m      console.log(`❌ Próba dostępu z nieprawidłowym użytkownikiem: ${username}`);[m
+[32m+[m[32m      return res.status(403).json({[m
+[32m+[m[32m        success: false,[m
+[32m+[m[32m        message: 'Brak uprawnień administratora'[m
+[32m+[m[32m      });[m
+[32m+[m[32m    }[m
+[32m+[m[32m  } catch (error) {[m
+[32m+[m[32m    console.error('❌ Błąd podczas weryfikacji tokenu:', error);[m
+[32m+[m[32m    return res.status(401).json({[m
+[32m+[m[32m      success: false,[m
+[32m+[m[32m      message: 'Nieprawidłowy token'[m
+[32m+[m[32m    });[m
+[32m+[m[32m  }[m
+[32m+[m[32m};[m
+[32m+[m
+[32m+[m[32m// Endpoint logowania administratora[m
+[32m+[m[32mapp.post('/api/admin/login', async (req, res) => {[m
+[32m+[m[32m  try {[m
+[32m+[m[32m    const { username, password } = req.body;[m
+[32m+[m[41m    [m
+[32m+[m[32m    // Walidacja danych wejściowych[m
+[32m+[m[32m    if (!username || !password) {[m
+[32m+[m[32m      return res.status(400).json({[m
+[32m+[m[32m        success: false,[m
+[32m+[m[32m        message: 'Nazwa użytkownika i hasło są wymagane'[m
+[32m+[m[32m      });[m
+[32m+[m[32m    }[m
+[32m+[m[41m    [m
+[32m+[m[32m    // Sprawdź dane logowania[m
+[32m+[m[32m    if (username === 'arturrek23' && password === 'Wysocka11223344') {[m
+[32m+[m[32m      // Generuj prosty token (w produkcji użyj JWT)[m
+[32m+[m[32m      const token = Buffer.from(`${username}:${Date.now()}`).toString('base64');[m
+[32m+[m[41m      [m
+[32m+[m[32m      // Logowanie udanego logowania[m
+[32m+[m[32m      console.log(`✅ Administrator ${username} zalogował się pomyślnie`);[m
+[32m+[m[41m      [m
+[32m+[m[32m      res.json({[m
+[32m+[m[32m        success: true,[m
+[32m+[m[32m        token: token,[m
+[32m+[m[32m        message: 'Zalogowano pomyślnie',[m
+[32m+[m[32m        user: { username }[m
+[32m+[m[32m      });[m
+[32m+[m[32m    } else {[m
+[32m+[m[32m      // Logowanie nieudanej próby logowania[m
+[32m+[m[32m      console.log(`❌ Nieudana próba logowania dla użytkownika: ${username}`);[m
+[32m+[m[41m      [m
+[32m+[m[32m      res.status(401).json({[m
+[32m+[m[32m        success: false,[m
+[32m+[m[32m        message: 'Nieprawidłowa nazwa użytkownika lub hasło'[m
+[32m+[m[32m      });[m
+[32m+[m[32m    }[m
+[32m+[m[32m  } catch (error) {[m
+[32m+[m[32m    console.error('❌ Błąd podczas logowania administratora:', error);[m
+[32m+[m[32m    res.status(500).json({[m
+[32m+[m[32m      success: false,[m
+[32m+[m[32m      message: 'Błąd serwera podczas logowania'[m
+[32m+[m[32m    });[m
+[32m+[m[32m  }[m
+[32m+[m[32m});[m
+[32m+[m
+[32m+[m[32m// Endpoint weryfikacji tokenu administratora[m
+[32m+[m[32mapp.get('/api/admin/verify', verifyAdminToken, async (req, res) => {[m
+[32m+[m[32m  try {[m
+[32m+[m[32m    res.json({[m
+[32m+[m[32m      success: true,[m
+[32m+[m[32m      message: 'Token jest ważny',[m
+[32m+[m[32m      user: req.adminUser[m
+[32m+[m[32m    });[m
+[32m+[m[32m  } catch (error) {[m
+[32m+[m[32m    console.error('❌ Błąd podczas weryfikacji tokenu administratora:', error);[m
+[32m+[m[32m    res.status(500).json({[m
+[32m+[m[32m      success: false,[m
+[32m+[m[32m      message: 'Błąd serwera podczas weryfikacji'[m
+[32m+[m[32m    });[m
+[32m+[m[32m  }[m
+[32m+[m[32m});[m
+[32m+[m
+[32m+[m[32m// Endpoint wylogowywania administratora[m
+[32m+[m[32mapp.post('/api/admin/logout', verifyAdminToken, async (req, res) => {[m
+[32m+[m[32m  try {[m
+[32m+[m[32m    // Logowanie wylogowania[m
+[32m+[m[32m    console.log(`✅ Administrator ${req.adminUser.username} wylogował się`);[m
+[32m+[m[41m    [m
+[32m+[m[32m    // W tym prostym systemie token jest usuwany po stronie frontendu[m
+[32m+[m[32m    // W produkcji można dodać blacklistę tokenów[m
+[32m+[m[32m    res.json({[m
+[32m+[m[32m      success: true,[m
+[32m+[m[32m      message: 'Wylogowano pomyślnie'[m
+[32m+[m[32m    });[m
+[32m+[m[32m  } catch (error) {[m
+[32m+[m[32m    console.error('❌ Błąd podczas wylogowywania administratora:', error);[m
+[32m+[m[32m    res.status(500).json({[m
+[32m+[m[32m      success: false,[m
+[32m+[m[32m      message: 'Błąd serwera podczas wylogowywania'[m
+[32m+[m[32m    });[m
+[32m+[m[32m  }[m
+[32m+[m[32m});[m
+[32m+[m
+ app.get('/api/spots', async (req, res) => {[m
+   try {[m
+     const dbPool = await checkDatabaseConnection();[m
+[36m@@ -1688,7 +1833,7 @@[m [mapp.get('/api/spots/:id/blocks', async (req, res) => {[m
+   }[m
+ });[m
+ // POST dodaj blokadę[m
+[31m-app.post('/api/spots/:id/blocks', async (req, res) => {[m
+[32m+[m[32mapp.post('/api/spots/:id/blocks', verifyAdminToken, async (req, res) => {[m
+   const spotId = req.params.id;[m
+   const { date } = req.body;[m
+   if (!date) {[m
+[36m@@ -1706,7 +1851,7 @@[m [mapp.post('/api/spots/:id/blocks', async (req, res) => {[m
+   }[m
+ });[m
+ // DELETE usuń blokadę[m
+[31m-app.delete('/api/spots/:id/blocks', async (req, res) => {[m
+[32m+[m[32mapp.delete('/api/spots/:id/blocks', verifyAdminToken, async (req, res) => {[m
+   const spotId = req.params.id;[m
+   const { date } = req.body;[m
+   if (!date) {[m
+[36m@@ -1976,7 +2121,7 @@[m [mapp.get('/api/check-db-structure', async (req, res) => {[m
+ [m
+ // --- ZARZĄDZANIE BLOKADAMI ---[m
+ // DELETE /api/spot-blocks/clear-all – usuń wszystkie blokady[m
+[31m-app.delete('/api/spot-blocks/clear-all', async (req, res) => {[m
+[32m+[m[32mapp.delete('/api/spot-blocks/clear-all', verifyAdminToken, async (req, res) => {[m
+   try {[m
+     const dbPool = await checkDatabaseConnection();[m
+     [m
+[36m@@ -1996,7 +2141,7 @@[m [mapp.delete('/api/spot-blocks/clear-all', async (req, res) => {[m
+ [m
+ // --- CRUD STANOWISK ---[m
+ // POST /api/spots – dodaj stanowisko[m
+[31m-app.post('/api/spots', async (req, res) => {[m
+[32m+[m[32mapp.post('/api/spots', verifyAdminToken, async (req, res) => {[m
+   const { name, is_active } = req.body;[m
+   try {[m
+     const dbPool = await checkDatabaseConnection();[m
+[36m@@ -2007,7 +2152,7 @@[m [mapp.post('/api/spots', async (req, res) => {[m
+   }[m
+ });[m
+ // DELETE /api/spots/:id – usuń stanowisko[m
+[31m-app.delete('/api/spots/:id', async (req, res) => {[m
+[32m+[m[32mapp.delete('/api/spots/:id', verifyAdminToken, async (req, res) => {[m
+   const spotId = req.params.id;[m
+   try {[m
+     const dbPool = await checkDatabaseConnection();[m
+[36m@@ -2018,7 +2163,7 @@[m [mapp.delete('/api/spots/:id', async (req, res) => {[m
+   }[m
+ });[m
+ // PATCH /api/spots/:id – zmień status aktywności[m
+[31m-app.patch('/api/spots/:id', async (req, res) => {[m
+[32m+[m[32mapp.patch('/api/spots/:id', verifyAdminToken, async (req, res) => {[m
+   const spotId = req.params.id;[m
+   const { is_active } = req.body;[m
+   try {[m
+[36m@@ -2057,7 +2202,7 @@[m [mapp.get('/api/spots/:id/reservations', async (req, res) => {[m
+ });[m
+ [m
+ // PATCH /api/reservations/:id – aktualizuj status rezerwacji[m
+[31m-app.patch('/api/reservations/:id', async (req, res) => {[m
+[32m+[m[32mapp.patch('/api/reservations/:id', verifyAdminToken, async (req, res) => {[m
+   const id = req.params.id;[m
+   const { status } = req.body;[m
+   [m
+[36m@@ -3147,7 +3292,7 @@[m [mapp.get('/api/reservations/:id/can-cancel', async (req, res) => {[m
+ });[m
+ [m
+ // DELETE /api/reservations/:id – usunięcie rezerwacji[m
+[31m-app.delete('/api/reservations/:id', async (req, res) => {[m
+[32m+[m[32mapp.delete('/api/reservations/:id', verifyAdminToken, async (req, res) => {[m
+   const id = req.params.id;[m
+   try {[m
+     const dbPool = await checkDatabaseConnection();[m

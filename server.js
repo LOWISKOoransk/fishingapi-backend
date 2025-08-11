@@ -10,15 +10,22 @@ const axios = require('axios');
 
 // Inicjalizacja Resend (wymaga RESEND_API_KEY w env)
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
+let resend = null;
 if (!RESEND_API_KEY) {
   console.warn('⚠️ Brak RESEND_API_KEY w zmiennych środowiskowych. Wysyłka e-maili nie zadziała.');
+} else {
+  resend = new Resend(RESEND_API_KEY);
 }
-const resend = new Resend(RESEND_API_KEY || '');
 // Nadawca e-maili (statyczny, z możliwością nadpisania zmienną środowiskową)
 const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'rezerwacje@xn--rask-c2a.pl';
 
 // Test wysyłania emaila przy starcie serwera
 async function testEmailSending() {
+  if (!resend) {
+    console.log('⚠️ Pomijam test emaila - brak klucza API');
+    return;
+  }
+  
   try {
     console.log('🧪 Testuję wysyłanie emaila...');
     await resend.emails.send({
@@ -1245,6 +1252,144 @@ async function checkDatabaseConnection() {
 }
 
 // GET /api/spots – lista wszystkich stanowisk
+// Middleware do weryfikacji tokenu administratora
+const verifyAdminToken = (req, res, next) => {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  
+  if (!token) {
+    console.log('❌ Próba dostępu bez tokenu autoryzacji');
+    return res.status(401).json({
+      success: false,
+      message: 'Brak tokenu autoryzacji'
+    });
+  }
+  
+  try {
+    // Dekoduj token (w produkcji użyj JWT)
+    const decoded = Buffer.from(token, 'base64').toString();
+    const [username, timestamp] = decoded.split(':');
+    
+    if (!username || !timestamp) {
+      console.log('❌ Nieprawidłowy format tokenu');
+      return res.status(401).json({
+        success: false,
+        message: 'Nieprawidłowy format tokenu'
+      });
+    }
+    
+    // Sprawdź czy token nie wygasł (24 godziny)
+    const tokenAge = Date.now() - parseInt(timestamp);
+    if (tokenAge > 24 * 60 * 60 * 1000) {
+      console.log(`❌ Token wygasł dla użytkownika: ${username}`);
+      return res.status(401).json({
+        success: false,
+        message: 'Token wygasł'
+      });
+    }
+    
+    // Sprawdź czy użytkownik to arturrek23
+    if (username === 'arturrek23') {
+      req.adminUser = { username };
+      next();
+    } else {
+      console.log(`❌ Próba dostępu z nieprawidłowym użytkownikiem: ${username}`);
+      return res.status(403).json({
+        success: false,
+        message: 'Brak uprawnień administratora'
+      });
+    }
+  } catch (error) {
+    console.error('❌ Błąd podczas weryfikacji tokenu:', error);
+    return res.status(401).json({
+      success: false,
+      message: 'Nieprawidłowy token'
+    });
+  }
+};
+
+// Endpoint logowania administratora
+app.post('/api/admin/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    
+    // Walidacja danych wejściowych
+    if (!username || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Nazwa użytkownika i hasło są wymagane'
+      });
+    }
+    
+    // Sprawdź dane logowania
+    if (username === 'arturrek23' && password === 'Wysocka11223344') {
+      // Generuj prosty token (w produkcji użyj JWT)
+      const token = Buffer.from(`${username}:${Date.now()}`).toString('base64');
+      
+      // Logowanie udanego logowania
+      console.log(`✅ Administrator ${username} zalogował się pomyślnie`);
+      
+      res.json({
+        success: true,
+        token: token,
+        message: 'Zalogowano pomyślnie',
+        user: { username }
+      });
+    } else {
+      // Logowanie nieudanej próby logowania
+      console.log(`❌ Nieudana próba logowania dla użytkownika: ${username}`);
+      
+      res.status(401).json({
+        success: false,
+        message: 'Nieprawidłowa nazwa użytkownika lub hasło'
+      });
+    }
+  } catch (error) {
+    console.error('❌ Błąd podczas logowania administratora:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Błąd serwera podczas logowania'
+    });
+  }
+});
+
+// Endpoint weryfikacji tokenu administratora
+app.get('/api/admin/verify', verifyAdminToken, async (req, res) => {
+  try {
+    res.json({
+      success: true,
+      message: 'Token jest ważny',
+      user: req.adminUser
+    });
+  } catch (error) {
+    console.error('❌ Błąd podczas weryfikacji tokenu administratora:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Błąd serwera podczas weryfikacji'
+    });
+  }
+});
+
+// Endpoint wylogowywania administratora
+app.post('/api/admin/logout', verifyAdminToken, async (req, res) => {
+  try {
+    // Logowanie wylogowania
+    console.log(`✅ Administrator ${req.adminUser.username} wylogował się`);
+    
+    // W tym prostym systemie token jest usuwany po stronie frontendu
+    // W produkcji można dodać blacklistę tokenów
+    res.json({
+      success: true,
+      message: 'Wylogowano pomyślnie'
+    });
+  } catch (error) {
+    console.error('❌ Błąd podczas wylogowywania administratora:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Błąd serwera podczas wylogowywania'
+    });
+  }
+});
+
 app.get('/api/spots', async (req, res) => {
   try {
     const dbPool = await checkDatabaseConnection();
@@ -1688,7 +1833,7 @@ app.get('/api/spots/:id/blocks', async (req, res) => {
   }
 });
 // POST dodaj blokadę
-app.post('/api/spots/:id/blocks', async (req, res) => {
+app.post('/api/spots/:id/blocks', verifyAdminToken, async (req, res) => {
   const spotId = req.params.id;
   const { date } = req.body;
   if (!date) {
@@ -1706,7 +1851,7 @@ app.post('/api/spots/:id/blocks', async (req, res) => {
   }
 });
 // DELETE usuń blokadę
-app.delete('/api/spots/:id/blocks', async (req, res) => {
+app.delete('/api/spots/:id/blocks', verifyAdminToken, async (req, res) => {
   const spotId = req.params.id;
   const { date } = req.body;
   if (!date) {
@@ -1976,7 +2121,7 @@ app.get('/api/check-db-structure', async (req, res) => {
 
 // --- ZARZĄDZANIE BLOKADAMI ---
 // DELETE /api/spot-blocks/clear-all – usuń wszystkie blokady
-app.delete('/api/spot-blocks/clear-all', async (req, res) => {
+app.delete('/api/spot-blocks/clear-all', verifyAdminToken, async (req, res) => {
   try {
     const dbPool = await checkDatabaseConnection();
     
@@ -1996,7 +2141,7 @@ app.delete('/api/spot-blocks/clear-all', async (req, res) => {
 
 // --- CRUD STANOWISK ---
 // POST /api/spots – dodaj stanowisko
-app.post('/api/spots', async (req, res) => {
+app.post('/api/spots', verifyAdminToken, async (req, res) => {
   const { name, is_active } = req.body;
   try {
     const dbPool = await checkDatabaseConnection();
@@ -2007,7 +2152,7 @@ app.post('/api/spots', async (req, res) => {
   }
 });
 // DELETE /api/spots/:id – usuń stanowisko
-app.delete('/api/spots/:id', async (req, res) => {
+app.delete('/api/spots/:id', verifyAdminToken, async (req, res) => {
   const spotId = req.params.id;
   try {
     const dbPool = await checkDatabaseConnection();
@@ -2018,7 +2163,7 @@ app.delete('/api/spots/:id', async (req, res) => {
   }
 });
 // PATCH /api/spots/:id – zmień status aktywności
-app.patch('/api/spots/:id', async (req, res) => {
+app.patch('/api/spots/:id', verifyAdminToken, async (req, res) => {
   const spotId = req.params.id;
   const { is_active } = req.body;
   try {
@@ -2057,7 +2202,7 @@ app.get('/api/spots/:id/reservations', async (req, res) => {
 });
 
 // PATCH /api/reservations/:id – aktualizuj status rezerwacji
-app.patch('/api/reservations/:id', async (req, res) => {
+app.patch('/api/reservations/:id', verifyAdminToken, async (req, res) => {
   const id = req.params.id;
   const { status } = req.body;
   
@@ -3147,7 +3292,7 @@ app.get('/api/reservations/:id/can-cancel', async (req, res) => {
 });
 
 // DELETE /api/reservations/:id – usunięcie rezerwacji
-app.delete('/api/reservations/:id', async (req, res) => {
+app.delete('/api/reservations/:id', verifyAdminToken, async (req, res) => {
   const id = req.params.id;
   try {
     const dbPool = await checkDatabaseConnection();
