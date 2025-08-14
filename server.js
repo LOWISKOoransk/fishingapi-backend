@@ -44,20 +44,27 @@ function getCompanyFooter() {
 
 // Funkcja pomocnicza do bezpiecznego formatowania dat w emailach (unika problemów ze strefami czasowymi)
 function formatDateForEmail(dateString) {
+  console.log(`🔍 DEBUG formatDateForEmail - WEJŚCIE:`, dateString, 'typ:', typeof dateString);
+  
   try {
     // Jeśli data jest już w formacie YYYY-MM-DD, parsuj ją bezpośrednio
     if (typeof dateString === 'string' && dateString.match(/^\d{4}-\d{2}-\d{2}$/)) {
       const [year, month, day] = dateString.split('-').map(Number);
+      console.log(`🔍 DEBUG formatDateForEmail - Parsuję YYYY-MM-DD: rok=${year}, miesiąc=${month}, dzień=${day}`);
+      
       // Formatujemy datę w polskim formacie (DD.MM.YYYY)
       const formattedDay = String(day).padStart(2, '0');
       const formattedMonth = String(month).padStart(2, '0');
       const formattedYear = String(year);
       
-      return `${formattedDay}.${formattedMonth}.${formattedYear}`;
+      const result = `${formattedDay}.${formattedMonth}.${formattedYear}`;
+      console.log(`🔍 DEBUG formatDateForEmail - WYNIK (YYYY-MM-DD):`, result);
+      return result;
     }
     
     // Dla innych formatów, użyj standardowej konwersji
     const date = new Date(dateString);
+    console.log(`🔍 DEBUG formatDateForEmail - Konwersja przez new Date():`, date);
     
     // Sprawdzamy czy data jest poprawna
     if (isNaN(date.getTime())) {
@@ -69,9 +76,11 @@ function formatDateForEmail(dateString) {
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const year = date.getFullYear();
     
-    return `${day}.${month}.${year}`;
+    const result = `${day}.${month}.${year}`;
+    console.log(`🔍 DEBUG formatDateForEmail - WYNIK (inny format):`, result);
+    return result;
   } catch (error) {
-    console.error('Błąd formatowania daty:', error);
+    console.error('❌ Błąd formatowania daty:', error);
     // Fallback - zwracamy oryginalny string
     return dateString;
   }
@@ -172,19 +181,26 @@ async function testP24Connection() {
 
 // Funkcja do obliczania czasu pobytu
 function getDurationText(startDate, endDate) {
+  console.log(`🔍 DEBUG getDurationText - WEJŚCIE: startDate=${startDate}, endDate=${endDate}`);
+  
   try {
     // Jeśli daty są w formacie YYYY-MM-DD, parsuj je bezpośrednio
     if (typeof startDate === 'string' && startDate.match(/^\d{4}-\d{2}-\d{2}$/) &&
         typeof endDate === 'string' && endDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
       
+      console.log(`🔍 DEBUG getDurationText - Parsuję YYYY-MM-DD format`);
       const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
       const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
+      
+      console.log(`🔍 DEBUG getDurationText - start: ${startYear}-${startMonth}-${startDay}, end: ${endYear}-${endMonth}-${endDay}`);
       
       const start = new Date(startYear, startMonth - 1, startDay);
       const end = new Date(endYear, endMonth - 1, endDay);
       
       const diffTime = Math.abs(end - start);
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      
+      console.log(`🔍 DEBUG getDurationText - różnica dni: ${diffDays}`);
       
       if (diffDays === 1) {
         return '1 dobę';
@@ -196,10 +212,13 @@ function getDurationText(startDate, endDate) {
     }
     
     // Dla innych formatów, użyj standardowej konwersji
+    console.log(`🔍 DEBUG getDurationText - Używam standardowej konwersji`);
     const start = new Date(startDate);
     const end = new Date(endDate);
     const diffTime = Math.abs(end - start);
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    console.log(`🔍 DEBUG getDurationText - różnica dni (standardowa): ${diffDays}`);
     
     if (diffDays === 1) {
       return '1 dobę';
@@ -209,7 +228,7 @@ function getDurationText(startDate, endDate) {
       return `${diffDays} dób`;
     }
   } catch (error) {
-    console.error('Błąd obliczania czasu pobytu:', error);
+    console.error('❌ Błąd obliczania czasu pobytu:', error);
     return 'nieznany czas pobytu';
   }
 }
@@ -694,6 +713,10 @@ function formatDateForDisplay(dateString) {
 
 // Funkcje do wysyłania emaili
 async function sendReservationEmail(reservation) {
+  console.log(`🔍 DEBUG sendReservationEmail - ROZPOCZYNAM`);
+  console.log(`🔍 DEBUG sendReservationEmail - reservation.date:`, reservation.date, 'typ:', typeof reservation.date);
+  console.log(`🔍 DEBUG sendReservationEmail - reservation.end_date:`, reservation.end_date, 'typ:', typeof reservation.end_date);
+  
   try {
     const paymentUrl = `${DOMAIN_CONFIG.frontend}/rezerwacja/${reservation.token}`;
     const transactionDate = new Date().toLocaleString('pl-PL');
