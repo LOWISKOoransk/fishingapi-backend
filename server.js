@@ -19,6 +19,54 @@ if (!RESEND_API_KEY) {
 // Nadawca e-maili (statyczny, z możliwością nadpisania zmienną środowiskową)
 const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'rezerwacje@xn--rask-c2a.pl';
 
+// Dane firmy do emaili
+const COMPANY_DATA = {
+  name: 'Artur Ropiak',
+  nip: '7451275665',
+  address: 'ul. Polna 23A, 12-140 Świętajno',
+  bdo: '000317001'
+};
+
+// Funkcja pomocnicza do generowania stopki firmy w emailach
+function getCompanyFooter() {
+  return `
+    <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px; border-top: 3px solid #6c757d;">
+      <h4 style="color: #495057; margin-top: 0; font-size: 16px; text-align: center;">Dane firmy:</h4>
+      <div style="text-align: center; color: #6c757d; line-height: 1.6;">
+        <p style="margin: 5px 0;"><strong>${COMPANY_DATA.name}</strong></p>
+        <p style="margin: 5px 0;">NIP: ${COMPANY_DATA.nip}</p>
+        <p style="margin: 5px 0;">${COMPANY_DATA.address}</p>
+        <p style="margin: 5px 0;">BDO: ${COMPANY_DATA.bdo}</p>
+      </div>
+    </div>
+  `;
+}
+
+// Funkcja pomocnicza do bezpiecznego formatowania dat w emailach (unika problemów ze strefami czasowymi)
+function formatDateForEmail(dateString) {
+  try {
+    // Tworzymy datę z stringa bez dodawania strefy czasowej
+    // Używamy lokalnej strefy czasowej, aby uniknąć przesunięć
+    const date = new Date(dateString);
+    
+    // Sprawdzamy czy data jest poprawna
+    if (isNaN(date.getTime())) {
+      throw new Error('Nieprawidłowa data');
+    }
+    
+    // Formatujemy datę w polskim formacie (DD.MM.YYYY)
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    
+    return `${day}.${month}.${year}`;
+  } catch (error) {
+    console.error('Błąd formatowania daty:', error);
+    // Fallback - zwracamy oryginalny string
+    return dateString;
+  }
+}
+
 // Test wysyłania emaila przy starcie serwera
 async function testEmailSending() {
   if (!resend) {
@@ -631,8 +679,8 @@ async function sendReservationEmail(reservation) {
           <p><strong>Email:</strong> ${reservation.email}</p>
           <p><strong>Numer rejestracyjny:</strong> ${reservation.car_plate}</p>
           <p><strong>Stanowisko:</strong> ${reservation.spot_id}</p>
-          <p><strong>Data przyjazdu:</strong> ${new Date(reservation.date).toLocaleDateString('pl-PL')}</p>
-          <p><strong>Data wyjazdu:</strong> ${new Date(reservation.end_date).toLocaleDateString('pl-PL')}</p>
+          <p><strong>Data przyjazdu:</strong> ${formatDateForEmail(reservation.date)}</p>
+          <p><strong>Data wyjazdu:</strong> ${formatDateForEmail(reservation.end_date)}</p>
         </div>
         
         <div style="background-color: #eff6ff; padding: 20px; border-radius: 8px; margin: 20px; border-left: 4px solid #3b82f6;">
@@ -651,12 +699,14 @@ async function sendReservationEmail(reservation) {
           <p><strong>Numer transakcji:</strong> ${transactionNumber}</p>
           <p><strong>Data transakcji:</strong> ${transactionDate}</p>
           <p><strong>Usługa:</strong> Rezerwacja stanowiska wędkarskiego nr ${reservation.spot_id}</p>
-          <p><strong>Okres pobytu:</strong> ${new Date(reservation.date).toLocaleDateString('pl-PL')} - ${new Date(reservation.end_date).toLocaleDateString('pl-PL')} (${getDurationText(reservation.date, reservation.end_date)})</p>
+          <p><strong>Okres pobytu:</strong> ${formatDateForEmail(reservation.date)} - ${formatDateForEmail(reservation.end_date)} (${getDurationText(reservation.date, reservation.end_date)})</p>
           <p><strong>Kwota:</strong> ${amount.toFixed(2)} zł</p>
           <br>
           <p><strong>Dane sprzedawcy:</strong></p>
-          <p>Artur Ropiak</p>
-          <p>NIP: 7451275665</p>
+          <p>${COMPANY_DATA.name}</p>
+          <p>NIP: ${COMPANY_DATA.nip}</p>
+          <p>${COMPANY_DATA.address}</p>
+          <p>BDO: ${COMPANY_DATA.bdo}</p>
         </div>
         
         <div style="background-color: #f8fafc; padding: 15px; border-radius: 8px; margin: 20px; border: 1px solid #e2e8f0;">
@@ -670,6 +720,8 @@ async function sendReservationEmail(reservation) {
             <strong>⚠️ UWAGA:</strong> Rezerwacja będzie ważna przez 15 minut. Po tym czasie zostanie automatycznie anulowana.
           </p>
         </div>
+        
+        ${getCompanyFooter()}
       </div>
     `;
 
@@ -715,8 +767,8 @@ async function sendPaymentConfirmationEmail(reservation) {
           <p><strong>Email:</strong> ${reservation.email}</p>
           <p><strong>Numer rejestracyjny:</strong> ${reservation.car_plate}</p>
           <p><strong>Stanowisko:</strong> ${reservation.spot_id}</p>
-          <p><strong>Data przyjazdu:</strong> ${new Date(reservation.date).toLocaleDateString('pl-PL')}</p>
-          <p><strong>Data wyjazdu:</strong> ${new Date(reservation.end_date).toLocaleDateString('pl-PL')}</p>
+          <p><strong>Data przyjazdu:</strong> ${formatDateForEmail(reservation.date)}</p>
+          <p><strong>Data wyjazdu:</strong> ${formatDateForEmail(reservation.end_date)}</p>
           <p><strong>Kwota zapłacona:</strong> ${amount.toFixed(2)} PLN</p>
         </div>
         
@@ -726,12 +778,14 @@ async function sendPaymentConfirmationEmail(reservation) {
           <p><strong>Data transakcji:</strong> ${transactionDate}</p>
           <p><strong>Kategoria usługi:</strong> Usługi rekreacyjne i sportowe</p>
           <p><strong>Usługa:</strong> Rezerwacja stanowiska wędkarskiego nr ${reservation.spot_id}</p>
-          <p><strong>Okres pobytu:</strong> ${new Date(reservation.date).toLocaleDateString('pl-PL')} - ${new Date(reservation.end_date).toLocaleDateString('pl-PL')} (${getDurationText(reservation.date, reservation.end_date)})</p>
+          <p><strong>Okres pobytu:</strong> ${formatDateForEmail(reservation.date)} - ${formatDateForEmail(reservation.end_date)} (${getDurationText(reservation.date, reservation.end_date)})</p>
           <p><strong>Kwota:</strong> ${amount.toFixed(2)} zł</p>
           <br>
           <p><strong>Dane sprzedawcy:</strong></p>
-          <p>Artur Ropiak</p>
-          <p>NIP: 7451275665</p>
+          <p>${COMPANY_DATA.name}</p>
+          <p>NIP: ${COMPANY_DATA.nip}</p>
+          <p>${COMPANY_DATA.address}</p>
+          <p>BDO: ${COMPANY_DATA.bdo}</p>
         </div>
         
         <div style="background-color: #f8fafc; padding: 20px; border-radius: 8px; margin: 20px; border-left: 4px solid #3b82f6;">
@@ -760,6 +814,8 @@ async function sendPaymentConfirmationEmail(reservation) {
             Dziękujemy za wybór Łowiska Młyn Rańsk! 🎣
           </p>
         </div>
+        
+        ${getCompanyFooter()}
       </div>
     `;
 
@@ -804,8 +860,8 @@ async function sendReservationCancellationEmail(reservation) {
           <p><strong>Email:</strong> ${reservation.email}</p>
           <p><strong>Numer rejestracyjny:</strong> ${reservation.car_plate}</p>
           <p><strong>Stanowisko:</strong> ${reservation.spot_id}</p>
-          <p><strong>Data przyjazdu:</strong> ${new Date(reservation.date).toLocaleDateString('pl-PL')}</p>
-          <p><strong>Data wyjazdu:</strong> ${new Date(reservation.end_date).toLocaleDateString('pl-PL')}</p>
+          <p><strong>Data przyjazdu:</strong> ${formatDateForEmail(reservation.date)}</p>
+          <p><strong>Data wyjazdu:</strong> ${formatDateForEmail(reservation.end_date)}</p>
           <p><strong>Kwota rezerwacji:</strong> ${amount.toFixed(2)} PLN</p>
         </div>
         
@@ -815,12 +871,14 @@ async function sendReservationCancellationEmail(reservation) {
           <p><strong>Data transakcji:</strong> ${transactionDate}</p>
           <p><strong>Kategoria usługi:</strong> Usługi rekreacyjne i sportowe</p>
           <p><strong>Usługa:</strong> Rezerwacja stanowiska wędkarskiego nr ${reservation.spot_id}</p>
-          <p><strong>Okres pobytu:</strong> ${new Date(reservation.date).toLocaleDateString('pl-PL')} - ${new Date(reservation.end_date).toLocaleDateString('pl-PL')} (${getDurationText(reservation.date, reservation.end_date)})</p>
+          <p><strong>Okres pobytu:</strong> ${formatDateForEmail(reservation.date)} - ${formatDateForEmail(reservation.end_date)} (${getDurationText(reservation.date, reservation.end_date)})</p>
           <p><strong>Kwota:</strong> ${amount.toFixed(2)} zł</p>
           <br>
           <p><strong>Dane sprzedawcy:</strong></p>
-          <p>Artur Ropiak</p>
-          <p>NIP: 7451275665</p>
+          <p>${COMPANY_DATA.name}</p>
+          <p>NIP: ${COMPANY_DATA.nip}</p>
+          <p>${COMPANY_DATA.address}</p>
+          <p>BDO: ${COMPANY_DATA.bdo}</p>
         </div>
         
         <div style="background-color: #f8fafc; padding: 20px; border-radius: 8px; margin: 20px; border-left: 4px solid #3b82f6;">
@@ -832,7 +890,7 @@ async function sendReservationCancellationEmail(reservation) {
         <div style="background-color: #eff6ff; padding: 20px; border-radius: 8px; margin: 20px; border-left: 4px solid #3b82f6;">
           <h3 style="color: #1e3a8a; margin-top: 0; font-size: 18px;">Chcesz zarezerwować ponownie?</h3>
           <p>Możesz utworzyć nową rezerwację na naszej stronie internetowej.</p>
-          <a href="${DOMAIN_CONFIG.frontend}" style="display: inline-block; background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; box-shadow: 0 4px 6px rgba(59, 130, 246, 0.3);">
+          <a href="${DOMAIN_CONFIG.frontend}" style="display: inline-block; background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; box-shadow: 0 4px 6px rgba(59,130, 246, 0.3);">
             Zarezerwuj ponownie
           </a>
         </div>
@@ -842,6 +900,8 @@ async function sendReservationCancellationEmail(reservation) {
             Dziękujemy za zainteresowanie Łowiskiem Młyn Rańsk! 🎣
           </p>
         </div>
+        
+        ${getCompanyFooter()}
       </div>
     `;
 
@@ -877,8 +937,8 @@ async function sendRefundRequestedEmail(reservation) {
           <h3 style="color: #92400e; margin-top: 0; font-size: 18px;">Szczegóły rezerwacji:</h3>
           <p><strong>Imię i nazwisko:</strong> ${reservation.first_name} ${reservation.last_name}</p>
           <p><strong>Stanowisko:</strong> ${reservation.spot_id}</p>
-          <p><strong>Data przyjazdu:</strong> ${new Date(reservation.date).toLocaleDateString('pl-PL')}</p>
-          <p><strong>Data wyjazdu:</strong> ${new Date(reservation.end_date).toLocaleDateString('pl-PL')}</p>
+          <p><strong>Data przyjazdu:</strong> ${formatDateForEmail(reservation.date)}</p>
+          <p><strong>Data wyjazdu:</strong> ${formatDateForEmail(reservation.end_date)}</p>
           <p><strong>Kwota:</strong> ${amount.toFixed(2)} PLN</p>
         </div>
         
@@ -906,10 +966,14 @@ async function sendRefundRequestedEmail(reservation) {
         <div style="background-color: #fef3c7; padding: 15px; border-radius: 8px; margin: 20px; border-left: 4px solid #f59e0b;">
           <p style="color: #92400e; font-size: 14px; margin: 0;">
             <strong>Dane sprzedawcy:</strong><br>
-            Artur Ropiak<br>
-            NIP: 7451275665
+            ${COMPANY_DATA.name}<br>
+            NIP: ${COMPANY_DATA.nip}<br>
+            ${COMPANY_DATA.address}<br>
+            BDO: ${COMPANY_DATA.bdo}
           </p>
         </div>
+        
+        ${getCompanyFooter()}
       </div>
     `;
 
@@ -941,8 +1005,8 @@ async function sendAdminCancellationEmail(reservation) {
           <h3 style="color: #e74c3c; margin-top: 0;">Szczegóły anulowanej rezerwacji:</h3>
           <p><strong>Imię i nazwisko:</strong> ${reservation.first_name} ${reservation.last_name}</p>
           <p><strong>Stanowisko:</strong> ${reservation.spot_id}</p>
-          <p><strong>Data przyjazdu:</strong> ${new Date(reservation.date).toLocaleDateString('pl-PL')}</p>
-          <p><strong>Data wyjazdu:</strong> ${new Date(reservation.end_date).toLocaleDateString('pl-PL')}</p>
+          <p><strong>Data przyjazdu:</strong> ${formatDateForEmail(reservation.date)}</p>
+          <p><strong>Data wyjazdu:</strong> ${formatDateForEmail(reservation.end_date)}</p>
           <p><strong>Kwota:</strong> ${amount.toFixed(2)} PLN</p>
         </div>
         
@@ -970,10 +1034,14 @@ async function sendAdminCancellationEmail(reservation) {
         <div style="background-color: #fef3c7; padding: 15px; border-radius: 8px; margin: 20px; border-left: 4px solid #f59e0b;">
           <p style="color: #92400e; font-size: 14px; margin: 0;">
             <strong>Dane sprzedawcy:</strong><br>
-            Artur Ropiak<br>
-            NIP: 7451275665
+            ${COMPANY_DATA.name}<br>
+            NIP: ${COMPANY_DATA.nip}<br>
+            ${COMPANY_DATA.address}<br>
+            BDO: ${COMPANY_DATA.bdo}
           </p>
         </div>
+        
+        ${getCompanyFooter()}
       </div>
     `;
 
@@ -1005,8 +1073,8 @@ async function sendRefundCompletedEmail(reservation) {
           <h3 style="color: #065f46; margin-top: 0; font-size: 18px;">Szczegóły zwróconej rezerwacji:</h3>
           <p><strong>Imię i nazwisko:</strong> ${reservation.first_name} ${reservation.last_name}</p>
           <p><strong>Stanowisko:</strong> ${reservation.spot_id}</p>
-          <p><strong>Data przyjazdu:</strong> ${new Date(reservation.date).toLocaleDateString('pl-PL')}</p>
-          <p><strong>Data wyjazdu:</strong> ${new Date(reservation.end_date).toLocaleDateString('pl-PL')}</p>
+          <p><strong>Data przyjazdu:</strong> ${formatDateForEmail(reservation.date)}</p>
+          <p><strong>Data wyjazdu:</strong> ${formatDateForEmail(reservation.end_date)}</p>
           <p><strong>Kwota zwrócona:</strong> ${amount.toFixed(2)} PLN</p>
         </div>
         
@@ -1034,10 +1102,14 @@ async function sendRefundCompletedEmail(reservation) {
         <div style="background-color: #fef3c7; padding: 15px; border-radius: 8px; margin: 20px; border-left: 4px solid #f59e0b;">
           <p style="color: #92400e; font-size: 14px; margin: 0;">
             <strong>Dane sprzedawcy:</strong><br>
-            Artur Ropiak<br>
-            NIP: 7451275665
+            ${COMPANY_DATA.name}<br>
+            NIP: ${COMPANY_DATA.nip}<br>
+            ${COMPANY_DATA.address}<br>
+            BDO: ${COMPANY_DATA.bdo}
           </p>
         </div>
+        
+        ${getCompanyFooter()}
       </div>
     `;
 
@@ -1069,8 +1141,8 @@ async function sendAdminRefundCompletedEmail(reservation) {
           <h3 style="color: #065f46; margin-top: 0; font-size: 18px;">Szczegóły anulowanej i zwróconej rezerwacji:</h3>
           <p><strong>Imię i nazwisko:</strong> ${reservation.first_name} ${reservation.last_name}</p>
           <p><strong>Stanowisko:</strong> ${reservation.spot_id}</p>
-          <p><strong>Data przyjazdu:</strong> ${new Date(reservation.date).toLocaleDateString('pl-PL')}</p>
-          <p><strong>Data wyjazdu:</strong> ${new Date(reservation.end_date).toLocaleDateString('pl-PL')}</p>
+          <p><strong>Data przyjazdu:</strong> ${formatDateForEmail(reservation.date)}</p>
+          <p><strong>Data wyjazdu:</strong> ${formatDateForEmail(reservation.end_date)}</p>
           <p><strong>Kwota zwrócona:</strong> ${amount.toFixed(2)} PLN</p>
         </div>
         
@@ -1098,10 +1170,14 @@ async function sendAdminRefundCompletedEmail(reservation) {
         <div style="background-color: #fef3c7; padding: 15px; border-radius: 8px; margin: 20px; border-left: 4px solid #f59e0b;">
           <p style="color: #92400e; font-size: 14px; margin: 0;">
             <strong>Dane sprzedawcy:</strong><br>
-            Artur Ropiak<br>
-            NIP: 7451275665
+            ${COMPANY_DATA.name}<br>
+            NIP: ${COMPANY_DATA.nip}<br>
+            ${COMPANY_DATA.address}<br>
+            BDO: ${COMPANY_DATA.bdo}
           </p>
         </div>
+        
+        ${getCompanyFooter()}
       </div>
     `;
 
