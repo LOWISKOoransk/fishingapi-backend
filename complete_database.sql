@@ -29,6 +29,7 @@ CREATE TABLE reservations (
     payment_id VARCHAR(255) DEFAULT NULL,
     p24_token VARCHAR(255) DEFAULT NULL,
     p24_order_id INT DEFAULT NULL,
+    regulamin_consent BOOLEAN NOT NULL DEFAULT FALSE COMMENT 'Czy użytkownik zaakceptował regulamin',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (spot_id) REFERENCES spots(id)
@@ -63,12 +64,13 @@ CREATE INDEX idx_reservations_status ON reservations(status);
 CREATE INDEX idx_reservations_date ON reservations(date);
 CREATE INDEX idx_reservations_spot_id ON reservations(spot_id);
 CREATE INDEX idx_reservations_payment_id ON reservations(payment_id);
+CREATE INDEX idx_reservations_regulamin_consent ON reservations(regulamin_consent);
 CREATE INDEX idx_spot_blocks_spot_date ON spot_blocks(spot_id, date);
 CREATE INDEX idx_spot_blocks_date ON spot_blocks(date);
 
 -- Dodaj komentarze do tabel
 ALTER TABLE spots COMMENT = 'Stanowiska wędkarskie';
-ALTER TABLE reservations COMMENT = 'Rezerwacje stanowisk';
+ALTER TABLE reservations COMMENT = 'Rezerwacje stanowisk z informacją o akceptacji regulaminu';
 ALTER TABLE spot_blocks COMMENT = 'Blokady stanowisk (admin, reservation, paid_reservation)';
 
 -- Sprawdź czy wszystko zostało utworzone poprawnie

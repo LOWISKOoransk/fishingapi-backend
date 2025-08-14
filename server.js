@@ -1849,7 +1849,7 @@ app.post('/api/reservations', async (req, res) => {
   
   const {
     first_name, last_name, phone, car_plate, email,
-    spot_id, date, start_time, end_date, end_time, amount, captcha_token // <-- dodane captcha_token
+    spot_id, date, start_time, end_date, end_time, amount, captcha_token, regulamin_consent // <-- dodane regulamin_consent
   } = req.body;
   
   // Weryfikacja captcha WŁĄCZONA
@@ -1875,8 +1875,15 @@ app.post('/api/reservations', async (req, res) => {
     date: !!date,
     start_time: !!start_time,
     end_date: !!end_date,
-    captcha_token: !!captcha_token
+    captcha_token: !!captcha_token,
+    regulamin_consent: !!regulamin_consent
   });
+  
+  // Sprawdź czy użytkownik zaakceptował regulamin
+  if (!regulamin_consent) {
+    return res.status(400).json({ error: 'Aby zarezerwować stanowisko, musisz zaakceptować regulamin.' });
+  }
+  
   if (!first_name || !last_name || !phone || !car_plate || !email || !spot_id || !date || !start_time || !end_date) {
     return res.status(400).json({ error: 'Brak wymaganych danych.' });
   }
@@ -1959,9 +1966,9 @@ app.post('/api/reservations', async (req, res) => {
     
     const dbPool = await checkDatabaseConnection();
     const [result] = await dbPool.query(
-      `INSERT INTO reservations (first_name, last_name, phone, car_plate, email, spot_id, date, start_time, end_date, end_time, status, token, amount)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [first_name, last_name, phone, car_plate, email, spot_id, dateFixed, start_time, endDateFixed, final_end_time, status, token, final_amount]
+      `INSERT INTO reservations (first_name, last_name, phone, car_plate, email, spot_id, date, start_time, end_date, end_time, status, token, amount, regulamin_consent)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [first_name, last_name, phone, car_plate, email, spot_id, dateFixed, start_time, endDateFixed, final_end_time, status, token, final_amount, regulamin_consent]
     );
     
     // Pobierz utworzoną rezerwację do wysłania emaila
@@ -3873,6 +3880,86 @@ app.post('/api/add-p24-token-column', async (req, res) => {
     res.json({ message: 'Kolumna p24_token została dodana pomyślnie' });
   } catch (error) {
     console.error('❌ Błąd podczas dodawania kolumny:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/regulamin-consents – pobierz wszystkie zgody na regulamin
+app.get('/api/regulamin-consents', verifyAdminToken, async (req, res) => {
+  try {
+    console.log('🔍 Pobieram wszystkie zgody na regulamin');
+    
+    const dbPool = await checkDatabaseConnection();
+    const [consents] = await dbPool.query(`
+      SELECT 
+        r.id,
+        r.first_name,
+        r.last_name,
+        r.email,
+        r.regulamin_consent,
+        r.created_at,
+        r.status,
+        s.name as spot_name
+      FROM reservations r
+      LEFT JOIN spots s ON r.spot_id = s.id
+      ORDER BY r.created_at DESC
+    `);
+    
+    console.log(`✅ Pobrano ${consents.length} zgód na regulamin`);
+    res.json(consents);
+  } catch (error) {
+    console.error('❌ Błąd podczas pobierania zgód na regulamin:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/regulamin-consents/:id – pobierz szczegóły zgody na regulamin
+app.get('/api/regulamin-consents/:id', verifyAdminToken, async (req, res) => {
+  try {
+    const reservationId = req.params.id;
+    console.log(`🔍 Pobieram szczegóły zgody na regulamin dla rezerwacji ${reservationId}`);
+    
+    const dbPool = await checkDatabaseConnection();
+    const [consent] = await dbPool.query(`
+      SELECT 
+        r.*,
+        s.name as spot_name
+      FROM reservations r
+      LEFT JOIN spots s ON r.spot_id = s.id
+      WHERE r.id = ?
+    `, [reservationId]);
+    
+    if (consent.length === 0) {
+      return res.status(404).json({ error: 'Rezerwacja nie została znaleziona' });
+    }
+    
+    console.log(`✅ Pobrano szczegóły zgody na regulamin dla rezerwacji ${reservationId}`);
+    res.json(consent[0]);
+  } catch (error) {
+    console.error('❌ Błąd podczas pobierania szczegółów zgody na regulamin:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/regulamin-consents/stats – statystyki zgód na regulamin
+app.get('/api/regulamin-consents/stats', verifyAdminToken, async (req, res) => {
+  try {
+    console.log('📊 Pobieram statystyki zgód na regulamin');
+    
+    const dbPool = await checkDatabaseConnection();
+    const [stats] = await dbPool.query(`
+      SELECT 
+        COUNT(*) as total_reservations,
+        SUM(CASE WHEN regulamin_consent = 1 THEN 1 ELSE 0 END) as accepted_consents,
+        SUM(CASE WHEN regulamin_consent = 0 THEN 1 ELSE 0 END) as missing_consents,
+        ROUND((SUM(CASE WHEN regulamin_consent = 1 THEN 1 ELSE 0 END) / COUNT(*)) * 100, 2) as consent_percentage
+      FROM reservations
+    `);
+    
+    console.log('✅ Pobrano statystyki zgód na regulamin');
+    res.json(stats[0]);
+  } catch (error) {
+    console.error('❌ Błąd podczas pobierania statystyk zgód na regulamin:', error);
     res.status(500).json({ error: error.message });
   }
 });
