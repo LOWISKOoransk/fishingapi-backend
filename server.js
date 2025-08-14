@@ -45,8 +45,18 @@ function getCompanyFooter() {
 // Funkcja pomocnicza do bezpiecznego formatowania dat w emailach (unika problemów ze strefami czasowymi)
 function formatDateForEmail(dateString) {
   try {
-    // Tworzymy datę z stringa bez dodawania strefy czasowej
-    // Używamy lokalnej strefy czasowej, aby uniknąć przesunięć
+    // Jeśli data jest już w formacie YYYY-MM-DD, parsuj ją bezpośrednio
+    if (typeof dateString === 'string' && dateString.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      const [year, month, day] = dateString.split('-').map(Number);
+      // Formatujemy datę w polskim formacie (DD.MM.YYYY)
+      const formattedDay = String(day).padStart(2, '0');
+      const formattedMonth = String(month).padStart(2, '0');
+      const formattedYear = String(year);
+      
+      return `${formattedDay}.${formattedMonth}.${formattedYear}`;
+    }
+    
+    // Dla innych formatów, użyj standardowej konwersji
     const date = new Date(dateString);
     
     // Sprawdzamy czy data jest poprawna
@@ -162,17 +172,45 @@ async function testP24Connection() {
 
 // Funkcja do obliczania czasu pobytu
 function getDurationText(startDate, endDate) {
-  const start = new Date(startDate);
-  const end = new Date(endDate);
-  const diffTime = Math.abs(end - start);
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-  
-  if (diffDays === 1) {
-    return '1 dobę';
-  } else if (diffDays >= 2 && diffDays <= 4) {
-    return `${diffDays} doby`;
-  } else {
-    return `${diffDays} dób`;
+  try {
+    // Jeśli daty są w formacie YYYY-MM-DD, parsuj je bezpośrednio
+    if (typeof startDate === 'string' && startDate.match(/^\d{4}-\d{2}-\d{2}$/) &&
+        typeof endDate === 'string' && endDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      
+      const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
+      const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
+      
+      const start = new Date(startYear, startMonth - 1, startDay);
+      const end = new Date(endYear, endMonth - 1, endDay);
+      
+      const diffTime = Math.abs(end - start);
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      
+      if (diffDays === 1) {
+        return '1 dobę';
+      } else if (diffDays >= 2 && diffDays <= 4) {
+        return `${diffDays} doby`;
+      } else {
+        return `${diffDays} dób`;
+      }
+    }
+    
+    // Dla innych formatów, użyj standardowej konwersji
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    const diffTime = Math.abs(end - start);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    if (diffDays === 1) {
+      return '1 dobę';
+    } else if (diffDays >= 2 && diffDays <= 4) {
+      return `${diffDays} doby`;
+    } else {
+      return `${diffDays} dób`;
+    }
+  } catch (error) {
+    console.error('Błąd obliczania czasu pobytu:', error);
+    return 'nieznany czas pobytu';
   }
 }
 
