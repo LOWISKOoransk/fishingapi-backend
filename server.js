@@ -1654,9 +1654,67 @@ app.get('/api/reservations/calendar', async (req, res) => {
     const [rows] = await dbPool.query(query, params);
     console.log('📅 Znaleziono rezerwacji:', rows.length);
     
+    // Dodatkowe logowanie dla debugowania
+    if (rows.length > 0) {
+      console.log('📅 Przykładowe rezerwacje:');
+      rows.slice(0, 3).forEach((res, index) => {
+        console.log(`  ${index + 1}. ID: ${res.id}, Stanowisko: ${res.spot_id}, Data: ${res.date} - ${res.end_date}, Status: ${res.status}`);
+      });
+    } else {
+      console.log('📅 Brak rezerwacji dla wybranego dnia');
+      
+      // Sprawdź wszystkie opłacone rezerwacje dla debugowania
+      const [allPaid] = await dbPool.query('SELECT id, spot_id, date, end_date, status FROM reservations WHERE status = ?', ['opłacona']);
+      console.log('📅 Wszystkie opłacone rezerwacje w bazie:', allPaid.length);
+      allPaid.forEach((res, index) => {
+        console.log(`  ${index + 1}. ID: ${res.id}, Stanowisko: ${res.spot_id}, Data: ${res.date} - ${res.end_date}`);
+      });
+    }
+    
     res.json(rows);
   } catch (err) {
     console.error('❌ Błąd w /api/reservations/calendar:', err.message);
+    res.status(503).json({ error: err.message });
+  }
+});
+
+// GET /api/reservations/debug – debugowanie rezerwacji (tylko dla admina)
+app.get('/api/reservations/debug', async (req, res) => {
+  try {
+    const dbPool = await checkDatabaseConnection();
+    
+    // Pobierz wszystkie opłacone rezerwacje
+    const [paidReservations] = await dbPool.query(`
+      SELECT id, spot_id, date, end_date, status, first_name, last_name, amount 
+      FROM reservations 
+      WHERE status = 'opłacona' 
+      ORDER BY date ASC
+    `);
+    
+    // Pobierz wszystkie rezerwacje (dla porównania)
+    const [allReservations] = await dbPool.query(`
+      SELECT id, spot_id, date, end_date, status, first_name, last_name, amount 
+      FROM reservations 
+      ORDER BY date ASC
+    `);
+    
+    console.log('🐛 DEBUG - Wszystkie opłacone rezerwacje:', paidReservations.length);
+    console.log('🐛 DEBUG - Wszystkie rezerwacje:', allReservations.length);
+    
+    res.json({
+      paid_reservations: paidReservations,
+      all_reservations: allReservations,
+      summary: {
+        total_paid: paidReservations.length,
+        total_all: allReservations.length,
+        statuses: allReservations.reduce((acc, res) => {
+          acc[res.status] = (acc[res.status] || 0) + 1;
+          return acc;
+        }, {})
+      }
+    });
+  } catch (err) {
+    console.error('❌ Błąd w /api/reservations/debug:', err.message);
     res.status(503).json({ error: err.message });
   }
 });
