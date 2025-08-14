@@ -1641,8 +1641,9 @@ app.get('/api/reservations/calendar', async (req, res) => {
     // Filtrowanie po dacie - sprawdzamy czy wybrany dzień należy do zakresu rezerwacji
     if (date) {
       // Rezerwacja trwa od date do end_date, więc wybrany dzień musi być w tym zakresie
-      query += ' AND ? BETWEEN date AND end_date';
-      params.push(date);
+      // Zamiast BETWEEN używamy prostszego porównania: wybrany dzień >= date AND wybrany dzień <= end_date
+      query += ' AND ? >= date AND ? <= end_date';
+      params.push(date, date);
     }
     
     // Sortowanie po dacie i czasie
