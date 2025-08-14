@@ -62,6 +62,28 @@ function formatDateForEmail(dateString) {
       return result;
     }
     
+    // Dla obiektów Date z bazy danych (UTC), konwertuj na lokalną strefę czasową
+    if (dateString instanceof Date || (typeof dateString === 'object' && dateString !== null)) {
+      console.log(`🔍 DEBUG formatDateForEmail - Otrzymano obiekt Date/object:`, dateString);
+      
+      // Konwertuj UTC na lokalną strefę czasową (Polska = UTC+1/+2)
+      const localDate = new Date(dateString);
+      
+      // Dodaj offset dla Polski (UTC+1/+2)
+      const polandOffset = 2; // UTC+2 (czas letni)
+      localDate.setHours(localDate.getHours() + polandOffset);
+      
+      console.log(`🔍 DEBUG formatDateForEmail - Data po konwersji na czas polski:`, localDate);
+      
+      const day = String(localDate.getDate()).padStart(2, '0');
+      const month = String(localDate.getMonth() + 1).padStart(2, '0');
+      const year = localDate.getFullYear();
+      
+      const result = `${day}.${month}.${year}`;
+      console.log(`🔍 DEBUG formatDateForEmail - WYNIK (obiekt Date):`, result);
+      return result;
+    }
+    
     // Dla innych formatów, użyj standardowej konwersji
     const date = new Date(dateString);
     console.log(`🔍 DEBUG formatDateForEmail - Konwersja przez new Date():`, date);
@@ -201,6 +223,37 @@ function getDurationText(startDate, endDate) {
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
       
       console.log(`🔍 DEBUG getDurationText - różnica dni: ${diffDays}`);
+      
+      if (diffDays === 1) {
+        return '1 dobę';
+      } else if (diffDays >= 2 && diffDays <= 4) {
+        return `${diffDays} doby`;
+      } else {
+        return `${diffDays} dób`;
+      }
+    }
+    
+    // Dla obiektów Date z bazy danych (UTC), konwertuj na lokalną strefę czasową
+    if ((startDate instanceof Date || (typeof startDate === 'object' && startDate !== null)) &&
+        (endDate instanceof Date || (typeof endDate === 'object' && endDate !== null))) {
+      
+      console.log(`🔍 DEBUG getDurationText - Otrzymano obiekty Date/object z bazy danych`);
+      
+      // Konwertuj UTC na lokalną strefę czasową (Polska = UTC+1/+2)
+      const startLocal = new Date(startDate);
+      const endLocal = new Date(endDate);
+      
+      // Dodaj offset dla Polski (UTC+1/+2)
+      const polandOffset = 2; // UTC+2 (czas letni)
+      startLocal.setHours(startLocal.getHours() + polandOffset);
+      endLocal.setHours(endLocal.getHours() + polandOffset);
+      
+      console.log(`🔍 DEBUG getDurationText - Daty po konwersji na czas polski: start=${startLocal}, end=${endLocal}`);
+      
+      const diffTime = Math.abs(endLocal - startLocal);
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      
+      console.log(`🔍 DEBUG getDurationText - różnica dni (obiekty Date): ${diffDays}`);
       
       if (diffDays === 1) {
         return '1 dobę';
