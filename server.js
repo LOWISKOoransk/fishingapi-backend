@@ -1591,14 +1591,72 @@ app.get('/api/spots', async (req, res) => {
   }
 });
 
-// GET /api/reservations – lista wszystkich rezerwacji
+// GET /api/reservations – lista rezerwacji z filtrowaniem
 app.get('/api/reservations', async (req, res) => {
   try {
+    const { date, status } = req.query;
     const dbPool = await checkDatabaseConnection();
-    const [rows] = await dbPool.query('SELECT * FROM reservations ORDER BY created_at DESC');
+    
+    let query = 'SELECT * FROM reservations';
+    let params = [];
+    
+    // Filtrowanie po dacie
+    if (date) {
+      query += ' WHERE date = ?';
+      params.push(date);
+    }
+    
+    // Filtrowanie po statusie
+    if (status) {
+      if (params.length > 0) {
+        query += ' AND status = ?';
+      } else {
+        query += ' WHERE status = ?';
+      }
+      params.push(status);
+    }
+    
+    // Sortowanie
+    query += ' ORDER BY created_at DESC';
+    
+    console.log('🔍 GET /api/reservations - Query:', query, 'Params:', params);
+    
+    const [rows] = await dbPool.query(query, params);
     res.json(rows);
   } catch (err) {
     console.error('❌ Błąd w /api/reservations:', err.message);
+    res.status(503).json({ error: err.message });
+  }
+});
+
+// GET /api/reservations/calendar – rezerwacje dla kalendarza admina (tylko opłacone)
+app.get('/api/reservations/calendar', async (req, res) => {
+  try {
+    const { date } = req.query;
+    const dbPool = await checkDatabaseConnection();
+    
+    let query = 'SELECT * FROM reservations WHERE status = ?';
+    let params = ['opłacona'];
+    
+    // Filtrowanie po dacie - sprawdzamy czy wybrany dzień należy do zakresu rezerwacji
+    if (date) {
+      // Rezerwacja trwa od date do end_date, więc wybrany dzień musi być w tym zakresie
+      query += ' AND ? BETWEEN date AND end_date';
+      params.push(date);
+    }
+    
+    // Sortowanie po dacie i czasie
+    query += ' ORDER BY date ASC, start_time ASC';
+    
+    console.log('📅 GET /api/reservations/calendar - Query:', query, 'Params:', params);
+    console.log('📅 Szukam rezerwacji dla dnia:', date);
+    
+    const [rows] = await dbPool.query(query, params);
+    console.log('📅 Znaleziono rezerwacji:', rows.length);
+    
+    res.json(rows);
+  } catch (err) {
+    console.error('❌ Błąd w /api/reservations/calendar:', err.message);
     res.status(503).json({ error: err.message });
   }
 });
