@@ -258,7 +258,7 @@ function getDurationText(startDate, endDate) {
       if (diffDays === 1) {
         return '1 dobę';
       } else if (diffDays >= 2 && diffDays <= 4) {
-        return `${diffDays} dobddy`;
+        return `${diffDays} doby`;
       } else {
         return `${diffDays} dób`;
       }
@@ -1351,6 +1351,60 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// ===== MIDDLEWARE TRYBU TECHNICZNEGO =====
+// Funkcja do sprawdzania trybu technicznego
+async function checkMaintenanceMode(req, res, next) {
+  // Wyjątki - zawsze pozwól na dostęp do tych endpointów
+  const allowedPaths = [
+    '/api/admin/login',
+    '/api/admin/verify', 
+    '/api/admin/logout',
+    '/api/maintenance/status',
+    '/api/maintenance/verify',
+    '/api/maintenance/toggle',
+    '/health',
+    '/'
+  ];
+  
+  // Sprawdź czy ścieżka jest dozwolona
+  if (allowedPaths.some(path => req.path.startsWith(path))) {
+    return next();
+  }
+  
+  try {
+    const dbPool = await checkDatabaseConnection();
+    const [rows] = await dbPool.query('SELECT value FROM system_config WHERE key_name = ?', ['maintenance_mode']);
+    
+    if (rows.length > 0 && rows[0].value === 'true') {
+      // Tryb techniczny włączony - sprawdź czy użytkownik ma dostęp
+      const maintenanceToken = req.headers['x-maintenance-token'];
+      
+      if (!maintenanceToken) {
+        return res.status(503).json({
+          success: false,
+          maintenance: true,
+          message: 'Strona jest w trybie technicznym. Dostęp tymczasowo ograniczony.',
+          timestamp: new Date().toISOString()
+        });
+      }
+      
+      // Sprawdź token w sesji (można dodać weryfikację w bazie)
+      // Na razie prosty sprawdzacz - w produkcji lepiej użyć JWT
+      next();
+    } else {
+      // Tryb techniczny wyłączony - normalny dostęp
+      next();
+    }
+  } catch (error) {
+    console.error('❌ Błąd podczas sprawdzania trybu technicznego:', error);
+    // W przypadku błędu - pozwól na dostęp (bezpieczniejsze)
+    next();
+  }
+}
+
+// Zastosuj middleware trybu technicznego
+app.use(checkMaintenanceMode);
+
 // Połączenie z bazą MySQL (lokalna lub Render)
 console.log('🔍 DEBUG - Zmienne środowiskowe:');
 console.log('DB_HOST:', process.env.DB_HOST);
@@ -1576,6 +1630,104 @@ app.post('/api/admin/logout', verifyAdminToken, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Błąd serwera podczas wylogowywania'
+    });
+  }
+});
+
+// ===== ENDPOINTY TRYBU TECHNICZNEGO =====
+
+// Sprawdzenie statusu trybu technicznego
+app.get('/api/maintenance/status', async (req, res) => {
+  try {
+    const dbPool = await checkDatabaseConnection();
+    const [rows] = await dbPool.query('SELECT key_name, value FROM system_config WHERE key_name IN (?, ?)', ['maintenance_mode', 'maintenance_password']);
+    
+    const config = {};
+    rows.forEach(row => {
+      config[row.key_name] = row.value;
+    });
+    
+    res.json({
+      success: true,
+      maintenanceMode: config.maintenance_mode === 'true',
+      hasPassword: !!config.maintenance_password
+    });
+  } catch (error) {
+    console.error('❌ Błąd podczas sprawdzania statusu trybu technicznego:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Błąd serwera podczas sprawdzania statusu'
+    });
+  }
+});
+
+// Weryfikacja hasła technicznego (dla użytkowników)
+app.post('/api/maintenance/verify', async (req, res) => {
+  try {
+    const { password } = req.body;
+    
+    if (!password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Hasło jest wymagane'
+      });
+    }
+    
+    const dbPool = await checkDatabaseConnection();
+    const [rows] = await dbPool.query('SELECT value FROM system_config WHERE key_name = ?', ['maintenance_password']);
+    
+    if (rows.length === 0 || rows[0].value !== password) {
+      return res.status(401).json({
+        success: false,
+        message: 'Nieprawidłowe hasło techniczne'
+      });
+    }
+    
+    // Generuj token dostępu technicznego
+    const maintenanceToken = Buffer.from(`maintenance:${Date.now()}:${Math.random().toString(36)}`).toString('base64');
+    
+    res.json({
+      success: true,
+      message: 'Dostęp techniczny przyznany',
+      maintenanceToken: maintenanceToken,
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() // 24h
+    });
+  } catch (error) {
+    console.error('❌ Błąd podczas weryfikacji hasła technicznego:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Błąd serwera podczas weryfikacji'
+    });
+  }
+});
+
+// Przełączanie trybu technicznego (tylko admin)
+app.post('/api/maintenance/toggle', verifyAdminToken, async (req, res) => {
+  try {
+    const { enabled } = req.body;
+    
+    if (typeof enabled !== 'boolean') {
+      return res.status(400).json({
+        success: false,
+        message: 'Parametr "enabled" musi być boolean'
+      });
+    }
+    
+    const dbPool = await checkDatabaseConnection();
+    await dbPool.query('UPDATE system_config SET value = ? WHERE key_name = ?', [enabled.toString(), 'maintenance_mode']);
+    
+    console.log(`🔧 Tryb techniczny ${enabled ? 'włączony' : 'wyłączony'} przez administratora ${req.adminUser.username}`);
+    
+    res.json({
+      success: true,
+      message: `Tryb techniczny ${enabled ? 'włączony' : 'wyłączony'} pomyślnie`,
+      maintenanceMode: enabled
+    });
+  } catch (error) {
+    console.error('❌ Błąd podczas przełączania trybu technicznego:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Błąd serwera podczas przełączania trybu'
     });
   }
 });
