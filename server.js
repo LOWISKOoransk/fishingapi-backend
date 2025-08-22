@@ -2511,6 +2511,9 @@ app.get('/api/spots/availability', async (req, res) => {
           
           console.log(`  Sprawdzam rezerwację: ${resvStart} - ${resvEnd} dla dnia ${day}`);
           
+          // POPRAWKA: Rezerwacja kończy się o 10:00, więc dzień zakończenia nie jest zajęty
+          // Rezerwacja 22-23: zajęta od 22 11:00 do 23 10:00
+          // Dzień 23 od 11:00 jest wolny (nie koliduje z rezerwacją 22-23)
           if (day >= resvStart && day < resvEnd) {
             console.log(`  ✅ Dzień ${day} zajęty przez rezerwację`);
             isBusy = true;
