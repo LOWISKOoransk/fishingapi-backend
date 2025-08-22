@@ -258,7 +258,7 @@ function getDurationText(startDate, endDate) {
       if (diffDays === 1) {
         return '1 dobę';
       } else if (diffDays >= 2 && diffDays <= 4) {
-        return `${diffDays} doby`;
+        return `${diffDays} dobddy`;
       } else {
         return `${diffDays} dób`;
       }
