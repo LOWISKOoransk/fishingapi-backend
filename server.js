@@ -166,10 +166,13 @@ const DOMAIN_CONFIG = {
 // Test połączenia z sandbox Przelewy24
 async function testP24Connection() {
   try {
-    console.log('Testuję połączenie z sandbox Przelewy24...');
-    console.log('Używam danych:');
-    console.log('  posId:', P24_CONFIG.posId);
-    console.log('  reportKey:', P24_CONFIG.reportKey);
+    console.log('🔧 Testuję połączenie z Przelewy24...');
+    console.log('📋 Używam danych:');
+    console.log('  merchantId:', P24_CONFIG.merchantId, '(', typeof P24_CONFIG.merchantId, ')');
+    console.log('  posId:', P24_CONFIG.posId, '(', typeof P24_CONFIG.posId, ')');
+    console.log('  reportKey:', P24_CONFIG.reportKey ? '***' + P24_CONFIG.reportKey.slice(-4) : 'BRAK', '(', typeof P24_CONFIG.reportKey, ')');
+    console.log('  crc:', P24_CONFIG.crc ? '***' + P24_CONFIG.crc.slice(-4) : 'BRAK', '(', typeof P24_CONFIG.crc, ')');
+    console.log('  sandbox:', P24_CONFIG.sandbox);
     console.log('  baseUrl:', P24_CONFIG.baseUrl);
     
 
@@ -323,11 +326,11 @@ function calculateRegistrationSign(sessionId, amount, currency = 'PLN') {
 // Suma kontrolna dla weryfikacji transakcji
 function calculateVerificationSign(sessionId, orderId, amount, currency = 'PLN') {
   const params = {
-    sessionId: sessionId,
-    orderId: orderId,
-    amount: amount,
-    currency: currency,
-    crc: P24_CONFIG.crc
+    sessionId: String(sessionId),
+    orderId: Number(orderId),
+    amount: Number(amount),
+    currency: String(currency),
+    crc: String(P24_CONFIG.crc)
   };
   
   const jsonString = JSON.stringify(params, null, 0);
@@ -361,12 +364,12 @@ function generateUniqueSessionId() {
 // Funkcja weryfikacji transakcji
 async function verifyTransaction(sessionId, orderId, amount, currency = 'PLN') {
   const verificationData = {
-    merchantId: P24_CONFIG.merchantId,
-    posId: P24_CONFIG.posId,
+    merchantId: Number(P24_CONFIG.merchantId),
+    posId: Number(P24_CONFIG.posId),
     sessionId: sessionId,
-    amount: amount,
+    amount: Number(amount),
     currency: currency,
-    orderId: orderId,
+    orderId: Number(orderId),
     sign: calculateVerificationSign(sessionId, orderId, amount, currency)
   };
 
@@ -385,7 +388,14 @@ async function verifyTransaction(sessionId, orderId, amount, currency = 'PLN') {
   if (response.status === 200) {
     logger.info('P24 verify ok', { sessionId, orderId });
   } else {
-    logger.error('P24 verify fail', { sessionId, orderId, status: response.status });
+    logger.error('P24 verify fail', { 
+      sessionId, 
+      orderId, 
+      status: response.status, 
+      responseData: result,
+      verificationData: verificationData,
+      authHeader: `Basic ${Buffer.from(`${P24_CONFIG.posId}:${P24_CONFIG.reportKey}`).toString('base64').substring(0, 20)}...`
+    });
     try { metrics.p24.verifyFail++; } catch {}
   }
   return result;
