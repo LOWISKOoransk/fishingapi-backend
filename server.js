@@ -1323,19 +1323,30 @@ const PORT = process.env.PORT || 4000;
 
 // Ustawienia ciasteczek dla sesji admina
 const isProd = process.env.NODE_ENV === 'production';
-const cookieOptions = () => ({
+const isSecureOrigin = (origin) => {
+  try {
+    if (!origin) return isProd;
+    const url = new URL(origin);
+    const isHttps = url.protocol === 'https:';
+    const isLocalhost = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+    return isHttps && !isLocalhost;
+  } catch {
+    return isProd;
+  }
+};
+const cookieOptions = (origin) => ({
   httpOnly: true,
-  secure: isProd,
-  sameSite: isProd ? 'none' : 'lax',
-  ...(isProd ? { partitioned: true } : {}),
+  secure: isSecureOrigin(origin),
+  sameSite: isSecureOrigin(origin) ? 'none' : 'lax',
+  ...(isSecureOrigin(origin) ? { partitioned: true } : {}),
   path: '/',
   maxAge: 24 * 60 * 60 * 1000
 });
-const cookieOptionsForClear = () => ({
+const cookieOptionsForClear = (origin) => ({
   httpOnly: true,
-  secure: isProd,
-  sameSite: isProd ? 'none' : 'lax',
-  ...(isProd ? { partitioned: true } : {}),
+  secure: isSecureOrigin(origin),
+  sameSite: isSecureOrigin(origin) ? 'none' : 'lax',
+  ...(isSecureOrigin(origin) ? { partitioned: true } : {}),
   path: '/'
 });
 
@@ -1630,7 +1641,7 @@ const verifyAdminSession = (req, res, next) => {
     }
     const tokenAge = Date.now() - parseInt(timestamp, 10);
     if (Number.isNaN(tokenAge) || tokenAge > 24 * 60 * 60 * 1000) {
-      res.clearCookie('admin_session', cookieOptionsForClear());
+      res.clearCookie('admin_session', cookieOptionsForClear(req.headers.origin));
       return res.status(401).json({ success: false, message: 'Sesja wygasła' });
     }
     if (username !== 'arturrek23') {
@@ -1660,7 +1671,7 @@ app.post('/api/admin/login', async (req, res) => {
     if (username === 'arturrek23' && password === 'Wysocka11223344') {
       const session = Buffer.from(`${username}:${Date.now()}`).toString('base64');
       logger.info('Admin login OK', { admin_id: username });
-      res.cookie('admin_session', session, cookieOptions());
+      res.cookie('admin_session', session, cookieOptions(req.headers.origin));
       res.json({ success: true, message: 'Zalogowano pomyślnie', user: { username } });
     } else {
       // Logowanie nieudanej próby logowania
@@ -1703,7 +1714,7 @@ app.post('/api/admin/logout', verifyAdminSession, async (req, res) => {
     // Logowanie wylogowania
     logger.info('Admin logout', { admin_id: req.adminUser.username });
     
-    res.clearCookie('admin_session', cookieOptionsForClear());
+    res.clearCookie('admin_session', cookieOptionsForClear(req.headers.origin));
     res.json({ success: true, message: 'Wylogowano pomyślnie' });
   } catch (error) {
     console.error('❌ Błąd podczas wylogowywania administratora:', error);
