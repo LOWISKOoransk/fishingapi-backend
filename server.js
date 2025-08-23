@@ -214,12 +214,30 @@ async function testP24Connection() {
     const auth = Buffer.from(`${P24_CONFIG.posId}:${P24_CONFIG.reportKey}`).toString('base64');
     console.log('Authorization (pierwsze 20 znaków):', auth.substring(0, 20) + '...');
     
-    const response = await fetch(`${P24_CONFIG.baseUrl}/testAccess`, {
+    // Używamy standardowego endpointu testowego
+    const testUrl = `${P24_CONFIG.baseUrl}/testAccess`;
+    console.log('🌐 Testuję połączenie z URL:', testUrl);
+    
+    // Dla produkcji P24 może wymagać innego formatu autoryzacji
+    const headers = {
+      'Content-Type': 'application/json'
+    };
+    
+    if (P24_CONFIG.sandbox) {
+      headers['Authorization'] = `Basic ${auth}`;
+    } else {
+      // Dla produkcji używamy alternatywnej metody autoryzacji
+      headers['Authorization'] = `Basic ${auth}`;
+      // Dodaj dodatkowe nagłówki dla produkcji
+      headers['X-P24-Merchant-Id'] = P24_CONFIG.merchantId;
+      headers['X-P24-Pos-Id'] = P24_CONFIG.posId;
+    }
+    
+    console.log('🔐 Używam nagłówków:', Object.keys(headers));
+    
+    const response = await fetch(testUrl, {
       method: 'GET',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Basic ${auth}`
-      }
+      headers: headers
     });
     console.log('Status testu połączenia:', response.status);
     
@@ -228,14 +246,38 @@ async function testP24Connection() {
       const errorText = await response.text();
       console.error('Odpowiedź błędu:', errorText);
       
-      if (response.status === 401) {
-        console.error('🔐 BŁĄD 401 - Incorrect authentication');
-        console.error('Sprawdź:');
-        console.error('  1. Czy P24_POS_ID jest poprawne');
-        console.error('  2. Czy P24_SECRET_ID jest poprawne');
-        console.error('  3. Czy klucze są aktywne w panelu P24');
-        console.error('  4. Czy P24_SANDBOX jest ustawione prawidłowo');
+          if (response.status === 401) {
+      console.error('🔐 BŁĄD 401 - Incorrect authentication');
+      console.error('Sprawdź:');
+      console.error('  1. Czy P24_POS_ID jest poprawne');
+      console.error('  2. Czy P24_SECRET_ID jest poprawne');
+      console.error('  3. Czy klucze są aktywne w panelu P24');
+      console.error('  4. Czy P24_SANDBOX jest ustawione prawidłowo');
+      console.error('  5. Czy IP serwera (44.229.227.142) jest na białej liście w panelu P24');
+      console.error('  6. Czy endpoint /testAccess jest dostępny dla produkcji');
+      
+      // Spróbuj alternatywny endpoint dla produkcji
+      if (!P24_CONFIG.sandbox) {
+        console.log('🔄 Próbuję alternatywny endpoint dla produkcji...');
+        try {
+          const altUrl = 'https://secure.przelewy24.pl/api/v1/testAccess';
+          console.log('🌐 Próbuję URL:', altUrl);
+          
+          const altResponse = await fetch(altUrl, {
+            method: 'GET',
+            headers: headers
+          });
+          
+          console.log('🔄 Alternatywny endpoint - status:', altResponse.status);
+          if (altResponse.status === 200) {
+            console.log('✅ Alternatywny endpoint działa!');
+            return await altResponse.json();
+          }
+        } catch (altError) {
+          console.log('❌ Alternatywny endpoint też nie działa:', altError.message);
+        }
       }
+    }
       
       return null;
     }
