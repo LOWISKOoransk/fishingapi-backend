@@ -182,7 +182,7 @@ async function testP24Connection() {
       console.log('⚠️ Nie udało się sprawdzić IP:', ipError.message);
     }
     
-    const auth = Buffer.from(`${P24_CONFIG.posId}:${P24_CONFIG.reportKey}`).toString('base64');
+    const auth = Buffer.from(`${Number(P24_CONFIG.posId)}:${P24_CONFIG.reportKey}`).toString('base64');
     console.log('Authorization:', `Basic ${auth}`);
     
     const response = await fetch(`${P24_CONFIG.baseUrl}/testAccess`, {
@@ -376,7 +376,7 @@ async function verifyTransaction(sessionId, orderId, amount, currency = 'PLN') {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Basic ${Buffer.from(`${P24_CONFIG.posId}:${P24_CONFIG.reportKey}`).toString('base64')}`
+      'Authorization': `Basic ${Buffer.from(`${Number(P24_CONFIG.posId)}:${P24_CONFIG.reportKey}`).toString('base64')}`
     },
     body: JSON.stringify(verificationData)
   });
@@ -432,9 +432,25 @@ async function createP24Payment(reservation, amount) {
       amount_grosz: amountInGrosz,
       currency: 'PLN'
     });
+    
+    // DEBUG AUTORYZACJA P24
+    console.log('🔐 DEBUG P24 AUTH:', {
+      posId: P24_CONFIG.posId,
+      posIdType: typeof P24_CONFIG.posId,
+      posIdAsNumber: Number(P24_CONFIG.posId),
+      reportKey: P24_CONFIG.reportKey ? `${P24_CONFIG.reportKey.substring(0, 8)}...` : 'BRAK',
+      reportKeyLength: P24_CONFIG.reportKey ? P24_CONFIG.reportKey.length : 0,
+      baseUrl: P24_CONFIG.baseUrl,
+      sandbox: P24_CONFIG.sandbox
+    });
+    
     // Użyj nowego API /api/v1/transaction/register
-    const authString = `${P24_CONFIG.posId}:${P24_CONFIG.reportKey}`;
+    // Upewnij się że posId jest liczbą (nie stringiem)
+    const authString = `${Number(P24_CONFIG.posId)}:${P24_CONFIG.reportKey}`;
     const authHeader = `Basic ${Buffer.from(authString).toString('base64')}`;
+    
+    console.log('🔐 AUTH STRING:', authString.replace(P24_CONFIG.reportKey, '***HIDDEN***'));
+    console.log('🔐 AUTH HEADER:', authHeader.substring(0, 20) + '...');
     
     const response = await fetch(`${P24_CONFIG.baseUrl}/transaction/register`, {
       method: 'POST',
@@ -450,7 +466,12 @@ async function createP24Payment(reservation, amount) {
     // Sprawdź odpowiedź
     if (response.status !== 200) {
       const errorData = await response.json();
-      logger.error('P24 register fail', { sessionId, status: response.status, error: errorData.error || 'Unknown' });
+      console.log('❌ P24 ERROR RESPONSE:', {
+        status: response.status,
+        headers: Object.fromEntries(response.headers.entries()),
+        errorData: errorData
+      });
+      logger.error('P24 register fail', { sessionId, status: response.status, error: errorData.error || 'Unknown', fullError: errorData });
       try { metrics.p24.errors++; } catch {}
       throw new Error(`Błąd Przelewy24: ${errorData.error || 'Nieznany błąd'}`);
     }
@@ -486,7 +507,7 @@ async function checkPaymentStatuses() {
         // Sprawdź status płatności w Przelewy24 jeśli jest payment_id
         if (reservation.payment_id) {
           try {
-            const auth = Buffer.from(`${P24_CONFIG.posId}:${P24_CONFIG.reportKey}`).toString('base64');
+            const auth = Buffer.from(`${Number(P24_CONFIG.posId)}:${P24_CONFIG.reportKey}`).toString('base64');
             
             const response = await fetch(`${P24_CONFIG.baseUrl}/transaction/status/${reservation.payment_id}`, {
               method: 'GET',
@@ -2122,7 +2143,7 @@ app.get('/api/reservations/token/:token', async (req, res) => {
       
       // Sprawdź status płatności w Przelewy24 (dla sandboxa)
       try {
-        const auth = Buffer.from(`${P24_CONFIG.posId}:${P24_CONFIG.reportKey}`).toString('base64');
+        const auth = Buffer.from(`${Number(P24_CONFIG.posId)}:${P24_CONFIG.reportKey}`).toString('base64');
         
         // Użyj sessionId do sprawdzania statusu (prawidłowy endpoint)
         const sessionId = reservation.payment_id;
@@ -3292,7 +3313,7 @@ app.post('/api/create-payment', async (req, res) => {
     // Generuj podpis dla rejestracji
     const sign = calculateRegistrationSign(uniqueSessionId, amount, currency);
 
-  const auth = Buffer.from(`${P24_CONFIG.posId}:${P24_CONFIG.reportKey}`).toString("base64");
+  const auth = Buffer.from(`${Number(P24_CONFIG.posId)}:${P24_CONFIG.reportKey}`).toString("base64");
 
     console.log('🔐 Dane autoryzacji:', {
       posId: P24_CONFIG.posId,
@@ -3522,7 +3543,7 @@ app.get('/api/rezerwacja/:token', async (req, res) => {
       
       // Sprawdź status płatności w Przelewy24 (dla sandboxa)
       try {
-        const auth = Buffer.from(`${P24_CONFIG.posId}:${P24_CONFIG.reportKey}`).toString('base64');
+        const auth = Buffer.from(`${Number(P24_CONFIG.posId)}:${P24_CONFIG.reportKey}`).toString('base64');
         
         // Użyj p24_token jeśli istnieje, w przeciwnym razie użyj payment_id (fallback dla starych rezerwacji)
         const tokenToUse = reservation.p24_token || reservation.payment_id;
@@ -3710,7 +3731,7 @@ app.get('/api/check-payment/:token', async (req, res) => {
     }
     
     // Sprawdź status w Przelewy24
-    const auth = Buffer.from(`${P24_CONFIG.posId}:${P24_CONFIG.reportKey}`).toString('base64');
+    const auth = Buffer.from(`${Number(P24_CONFIG.posId)}:${P24_CONFIG.reportKey}`).toString('base64');
     
     const response = await fetch(`${P24_CONFIG.baseUrl}/transaction/status/${reservation.payment_id}`, {
       method: 'GET',
@@ -4129,7 +4150,7 @@ app.get('/api/reservation/status/:token', async (req, res) => {
         const sessionId = reservation.payment_id;
         console.log('🔧 Polling - Używam sessionId:', sessionId);
         
-        const auth = Buffer.from(`${P24_CONFIG.posId}:${P24_CONFIG.reportKey}`).toString('base64');
+        const auth = Buffer.from(`${Number(P24_CONFIG.posId)}:${P24_CONFIG.reportKey}`).toString('base64');
         // PRAWIDŁOWY endpoint do sprawdzania statusu
         const url = `${P24_CONFIG.baseUrl}/transaction/by/sessionId/${sessionId}`;
         
