@@ -141,8 +141,8 @@ const P24_CONFIG = {
   apiKey: process.env.P24_API_KEY,
   crc: process.env.P24_CRC,
   // SecretId (alias reportKey) – używany do Basic Auth w raportach/verify
-  reportKey: process.env.P24_SECRET_ID || process.env.P24_REPORT_KEY,
-  secretId: process.env.P24_SECRET_ID || process.env.P24_REPORT_KEY,
+  reportKey: process.env.P24_SECRET_ID,
+  secretId: process.env.P24_SECRET_ID,
   sandbox: String(process.env.P24_SANDBOX).toLowerCase() === 'true' ? true : false,
   baseUrl: process.env.P24_BASE_URL || (String(process.env.P24_SANDBOX).toLowerCase() === 'true'
     ? 'https://sandbox.przelewy24.pl/api/v1'
@@ -1580,7 +1580,7 @@ console.log('🔧 P24_CONFIG debug:', {
 if (!process.env.RESEND_API_KEY) {
   logger.warn('Brakujące klucze ENV', { missing: ['RESEND_API_KEY'] });
 }
-const missingP24 = ['P24_MERCHANT_ID','P24_POS_ID','P24_API_KEY','P24_CRC','P24_SECRET_ID','P24_REPORT_KEY']
+const missingP24 = ['P24_MERCHANT_ID','P24_POS_ID','P24_API_KEY','P24_CRC','P24_SECRET_ID']
   .filter(k => !process.env[k]);
 if (missingP24.length) {
   logger.warn('Brakujące klucze ENV', { missing: missingP24 });
