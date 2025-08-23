@@ -137,7 +137,7 @@ testEmailSending();
 // Konfiguracja Przelewy24 – sekrety pobierane z ENV (NIE commituj prawdziwych kluczy)
 const P24_CONFIG = {
   merchantId: Number(process.env.P24_MERCHANT_ID),
-  posId: Number(process.env.P24_POS_ID),
+  posId: String(process.env.P24_POS_ID), // Zmienione na String dla autoryzacji
   apiKey: process.env.P24_API_KEY,
   crc: process.env.P24_CRC,
   // SecretId (alias reportKey) – używany do Basic Auth w raportach/verify
@@ -397,7 +397,7 @@ async function createP24Payment(reservation, amount) {
   
   const p24Params = {
     merchantId: parseInt(P24_CONFIG.merchantId),
-    posId: parseInt(P24_CONFIG.posId),
+    posId: Number(P24_CONFIG.posId), // Konwertuj string z powrotem na liczbę dla API
     sessionId: sessionId,
     amount: amountInGrosz,
     currency: 'PLN',
@@ -1542,6 +1542,18 @@ logger.info('Start serwera', {
   NODE_ENV: process.env.NODE_ENV,
   P24_SANDBOX: String(process.env.P24_SANDBOX),
   callbackUrl: `${process.env.BACKEND_URL || 'http://localhost:'+ (process.env.PORT || 4000)}/api/payment/p24/status`
+});
+
+// Debug P24_CONFIG
+console.log('🔧 P24_CONFIG debug:', {
+  merchantId: P24_CONFIG.merchantId,
+  merchantIdType: typeof P24_CONFIG.merchantId,
+  posId: P24_CONFIG.posId,
+  posIdType: typeof P24_CONFIG.posId,
+  reportKey: P24_CONFIG.reportKey,
+  reportKeyType: typeof P24_CONFIG.reportKey,
+  sandbox: P24_CONFIG.sandbox,
+  baseUrl: P24_CONFIG.baseUrl
 });
 
 if (!process.env.RESEND_API_KEY) {
@@ -3284,7 +3296,9 @@ app.post('/api/create-payment', async (req, res) => {
 
     console.log('🔐 Dane autoryzacji:', {
       posId: P24_CONFIG.posId,
+      posIdType: typeof P24_CONFIG.posId,
       reportKey: P24_CONFIG.reportKey,
+      reportKeyType: typeof P24_CONFIG.reportKey,
       auth: auth
     });
     
