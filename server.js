@@ -1683,6 +1683,9 @@ const verifyAdminSession = (req, res, next) => {
   }
 };
 
+// Alias używany przez trasy admina
+const verifyAdminToken = verifyAdminSession;
+
 // Endpoint logowania administratora
 app.post('/api/admin/login', async (req, res) => {
   try {
