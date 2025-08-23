@@ -144,7 +144,7 @@ const P24_CONFIG = {
   reportKey: process.env.P24_SECRET_ID,
   secretId: process.env.P24_SECRET_ID,
   sandbox: String(process.env.P24_SANDBOX).toLowerCase() === 'true',
-  baseUrl: process.env.P24_BASE_URL || 'https://secure.przelewy24.pl/api/v1'
+  baseUrl: process.env.P24_BASE_URL || 'https://secure.przelewy24.pl/api/v1'  
 };
 
 // DEBUG: Sprawdź czy zmienne środowiskowe są poprawnie odbierane
@@ -2397,32 +2397,14 @@ app.post('/api/reservations', async (req, res) => {
   // Nie ustawiamy created_at ręcznie, żeby uniknąć problemów ze strefami czasowymi
   const final_end_time = end_time || '10:00:00';
 
-  // Naprawione przetwarzanie dat - konwertuj z lokalnej strefy czasowej na UTC
-  // DODATKOWO: dodaj jeden dzień do dat otrzymanych z frontendu, żeby kompensować błąd frontendu
+  // Przetwarzanie dat - konwertuj z lokalnej strefy czasowej na UTC
+  // USUNIĘTO: korekta +1 dnia - frontend poprawnie przekazuje daty
   let dateFixed = parseFrontendDate(date);
   let endDateFixed = parseFrontendDate(end_date);
   
-  // Dodaj jeden dzień do obu dat, żeby kompensować błąd frontendu
-  if (dateFixed && endDateFixed) {
-    const [year, month, day] = dateFixed.split('-').map(Number);
-    const [endYear, endMonth, endDay] = endDateFixed.split('-').map(Number);
-    
-    // Dodaj jeden dzień
-    const adjustedDate = new Date(year, month - 1, day + 1);
-    const adjustedEndDate = new Date(endYear, endMonth - 1, endDay + 1);
-    
-    // Konwertuj z powrotem na format YYYY-MM-DD
-    dateFixed = adjustedDate.toISOString().split('T')[0];
-    endDateFixed = adjustedEndDate.toISOString().split('T')[0];
-    
-    console.log('🔍 DEBUG REZERWACJA - DATY PO KOREKCIE (+1 dzień):');
-    console.log('dateFixed (skorygowany):', dateFixed);
-    console.log('endDateFixed (skorygowany):', endDateFixed);
-  }
-  
-  console.log('🔍 DEBUG REZERWACJA - DATY PO KONWERSJI I KOREKCIE:');
-  console.log('dateFixed (skorygowany):', dateFixed);
-  console.log('endDateFixed (skorygowany):', endDateFixed);
+  console.log('🔍 DEBUG REZERWACJA - DATY PO KONWERSJI (bez korekty):');
+  console.log('dateFixed (oryginalny):', dateFixed);
+  console.log('endDateFixed (oryginalny):', endDateFixed);
 
   // Obliczanie liczby dób hotelowych (11:00-10:00 następnego dnia)
   function parseYMD(str) {
@@ -2463,10 +2445,10 @@ app.post('/api/reservations', async (req, res) => {
   }
 
   try {
-    // DEBUG: Sprawdź co dokładnie jest wysyłane do bazy (po korekcie +1 dzień)
+    // DEBUG: Sprawdź co dokładnie jest wysyłane do bazy (daty oryginalne)
     console.log('🔍 DEBUG REZERWACJA - WYSYŁANIE DO BAZY:');
-    console.log('date (przyjazd, skorygowany):', dateFixed);
-    console.log('end_date (wyjazd, skorygowany):', endDateFixed);
+    console.log('date (przyjazd, oryginalny):', dateFixed);
+    console.log('end_date (wyjazd, oryginalny):', endDateFixed);
     
     const dbPool = await checkDatabaseConnection();
     const [result] = await dbPool.query(
