@@ -143,11 +143,20 @@ const P24_CONFIG = {
   // SecretId (alias reportKey) – używany do Basic Auth w raportach/verify
   reportKey: process.env.P24_SECRET_ID,
   secretId: process.env.P24_SECRET_ID,
-  sandbox: String(process.env.P24_SANDBOX).toLowerCase() === 'true' ? true : false,
-  baseUrl: process.env.P24_BASE_URL || (String(process.env.P24_SANDBOX).toLowerCase() === 'true'
-    ? 'https://sandbox.przelewy24.pl/api/v1'
-    : 'https://secure.przelewy24.pl/api/v1')
+  sandbox: String(process.env.P24_SANDBOX).toLowerCase() === 'true',
+  baseUrl: process.env.P24_BASE_URL || 'https://secure.przelewy24.pl/api/v1'
 };
+
+// DEBUG: Sprawdź czy zmienne środowiskowe są poprawnie odbierane
+console.log('🔍 DEBUG P24_CONFIG:', {
+  merchantId: P24_CONFIG.merchantId,
+  posId: P24_CONFIG.posId,
+  posIdType: typeof P24_CONFIG.posId,
+  reportKey: P24_CONFIG.reportKey,
+  reportKeyType: typeof P24_CONFIG.reportKey,
+  sandbox: P24_CONFIG.sandbox,
+  baseUrl: P24_CONFIG.baseUrl
+});
 
 // Pomocnicza funkcja do budowy URL przekierowania do bramki P24
 function getP24RedirectUrl(paymentToken) {
