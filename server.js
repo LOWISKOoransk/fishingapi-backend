@@ -1422,7 +1422,42 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
 
 // ===== MIDDLEWARE TRYBU TECHNICZNEGO =====
-// Funkcja do sprawdzania trybu technicznego
+// Cache dla statusu trybu technicznego (5 sekund)
+let maintenanceStatusCache = {
+  maintenanceMode: false,
+  hasPassword: false,
+  lastUpdated: 0,
+  cacheDuration: 5000 // 5 sekund
+};
+
+// Funkcja do aktualizacji cache'a
+async function updateMaintenanceCache() {
+  try {
+    const dbPool = await checkDatabaseConnection();
+    const [rows] = await dbPool.query('SELECT key_name, value FROM system_config WHERE key_name IN (?, ?)', ['maintenance_mode', 'maintenance_password']);
+    
+    const config = {};
+    rows.forEach(row => {
+      config[row.key_name] = row.value;
+    });
+    
+    maintenanceStatusCache = {
+      maintenanceMode: config.maintenance_mode === 'true',
+      hasPassword: !!config.maintenance_password,
+      lastUpdated: Date.now(),
+      cacheDuration: 5000
+    };
+    
+    logger.debug('Maintenance cache updated', { 
+      maintenanceMode: maintenanceStatusCache.maintenanceMode,
+      hasPassword: maintenanceStatusCache.hasPassword 
+    });
+  } catch (error) {
+    logger.error('Error updating maintenance cache', { message: error.message });
+  }
+}
+
+// Funkcja do sprawdzania trybu technicznego z cache'em
 async function checkMaintenanceMode(req, res, next) {
   // Wyjątki - zawsze pozwól na dostęp do tych endpointów
   const allowedPaths = [
@@ -1442,15 +1477,35 @@ async function checkMaintenanceMode(req, res, next) {
   }
   
   try {
-    const dbPool = await checkDatabaseConnection();
-    const [rows] = await dbPool.query('SELECT value FROM system_config WHERE key_name = ?', ['maintenance_mode']);
+    // Sprawdź cache - jeśli jest aktualny, użyj go
+    const now = Date.now();
+    if (now - maintenanceStatusCache.lastUpdated < maintenanceStatusCache.cacheDuration) {
+      if (maintenanceStatusCache.maintenanceMode) {
+        // Tryb techniczny włączony - sprawdź czy użytkownik ma dostęp
+        const maintenanceToken = req.headers['x-maintenance-token'];
+        
+        if (!maintenanceToken) {
+          logger.info('INFO | MAINTENANCE_ACCESS_DENIED', { initiator: 'user', scope: 'all_spots' });
+          return res.status(503).json({
+            success: false,
+            maintenance: true,
+            message: 'Strona jest w trybie technicznym. Dostęp tymczasowo ograniczony.',
+            timestamp: new Date().toISOString()
+          });
+        }
+      }
+      return next();
+    }
     
-    if (rows.length > 0 && rows[0].value === 'true') {
+    // Cache wygasł - zaktualizuj go
+    await updateMaintenanceCache();
+    
+    if (maintenanceStatusCache.maintenanceMode) {
       // Tryb techniczny włączony - sprawdź czy użytkownik ma dostęp
       const maintenanceToken = req.headers['x-maintenance-token'];
       
       if (!maintenanceToken) {
-        logger.info('INFO | MAINTENANCE_TOGGLE', { initiator: 'user', enabled: true, scope: 'all_spots' });
+        logger.info('INFO | MAINTENANCE_ACCESS_DENIED', { initiator: 'user', scope: 'all_spots' });
         return res.status(503).json({
           success: false,
           maintenance: true,
@@ -1458,14 +1513,9 @@ async function checkMaintenanceMode(req, res, next) {
           timestamp: new Date().toISOString()
         });
       }
-      
-      // Sprawdź token w sesji (można dodać weryfikację w bazie)
-      // Na razie prosty sprawdzacz - w produkcji lepiej użyć JWT
-      next();
-    } else {
-      // Tryb techniczny wyłączony - normalny dostęp
-      next();
     }
+    
+    next();
   } catch (error) {
     logger.error('Maintenance check error', { message: error.message });
     // W przypadku błędu - pozwól na dostęp (bezpieczniejsze)
@@ -1475,6 +1525,16 @@ async function checkMaintenanceMode(req, res, next) {
 
 // Zastosuj middleware trybu technicznego
 app.use(checkMaintenanceMode);
+
+// Inicjalizacja cache'a trybu technicznego przy starcie
+updateMaintenanceCache().then(() => {
+  logger.info('Maintenance cache initialized', { 
+    maintenanceMode: maintenanceStatusCache.maintenanceMode,
+    hasPassword: maintenanceStatusCache.hasPassword 
+  });
+}).catch(error => {
+  logger.error('Failed to initialize maintenance cache', { message: error.message });
+});
 
 // Połączenie z bazą MySQL (lokalna lub Render)
 logger.info('Start serwera', {
@@ -1764,18 +1824,23 @@ app.post('/api/admin/logout', verifyAdminSession, async (req, res) => {
 // Sprawdzenie statusu trybu technicznego
 app.get('/api/maintenance/status', async (req, res) => {
   try {
-    const dbPool = await checkDatabaseConnection();
-    const [rows] = await dbPool.query('SELECT key_name, value FROM system_config WHERE key_name IN (?, ?)', ['maintenance_mode', 'maintenance_password']);
+    // Sprawdź cache - jeśli jest aktualny, użyj go
+    const now = Date.now();
+    if (now - maintenanceStatusCache.lastUpdated < maintenanceStatusCache.cacheDuration) {
+      return res.json({
+        success: true,
+        maintenanceMode: maintenanceStatusCache.maintenanceMode,
+        hasPassword: maintenanceStatusCache.hasPassword
+      });
+    }
     
-    const config = {};
-    rows.forEach(row => {
-      config[row.key_name] = row.value;
-    });
+    // Cache wygasł - zaktualizuj go
+    await updateMaintenanceCache();
     
     res.json({
       success: true,
-      maintenanceMode: config.maintenance_mode === 'true',
-      hasPassword: !!config.maintenance_password
+      maintenanceMode: maintenanceStatusCache.maintenanceMode,
+      hasPassword: maintenanceStatusCache.hasPassword
     });
   } catch (error) {
     console.error('❌ Błąd podczas sprawdzania statusu trybu technicznego:', error);
@@ -1840,6 +1905,9 @@ app.post('/api/maintenance/toggle', verifyAdminToken, async (req, res) => {
     
     const dbPool = await checkDatabaseConnection();
     await dbPool.query('UPDATE system_config SET value = ? WHERE key_name = ?', [enabled.toString(), 'maintenance_mode']);
+    
+    // Natychmiast zaktualizuj cache
+    await updateMaintenanceCache();
     
     console.log(`🔧 Tryb techniczny ${enabled ? 'włączony' : 'wyłączony'} przez administratora ${req.adminUser.username}`);
     
