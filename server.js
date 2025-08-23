@@ -3,6 +3,7 @@ require('dotenv').config();
 const express = require('express');
 const mysql = require('mysql2/promise');
 const cors = require('cors');
+const cookieParser = require('cookie-parser');
 const { v4: uuidv4 } = require('uuid');
 const { Resend } = require('resend');
 const crypto = require('crypto');
@@ -1319,6 +1320,22 @@ const app = express();
 app.use(requestIdMiddleware);
 const PORT = process.env.PORT || 4000;
 
+// Ustawienia ciasteczek dla sesji admina
+const isProd = process.env.NODE_ENV === 'production';
+const cookieOptions = () => ({
+  httpOnly: true,
+  secure: isProd,
+  sameSite: isProd ? 'none' : 'lax',
+  path: '/',
+  maxAge: 24 * 60 * 60 * 1000
+});
+const cookieOptionsForClear = () => ({
+  httpOnly: true,
+  secure: isProd,
+  sameSite: isProd ? 'none' : 'lax',
+  path: '/'
+});
+
 // Konfiguracja CORS - pozwól na żądania z frontendu (również www i lokalne)
 const allowedOrigins = [
   DOMAIN_CONFIG.frontend,
@@ -1358,6 +1375,7 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(cookieParser());
 
 // ===== MIDDLEWARE TRYBU TECHNICZNEGO =====
 // Funkcja do sprawdzania trybu technicznego
@@ -1593,58 +1611,30 @@ function checkBlockMismatch({ expected, affected, sqlOp }) {
 }
 
 // GET /api/spots – lista wszystkich stanowisk
-// Middleware do weryfikacji tokenu administratora
-const verifyAdminToken = (req, res, next) => {
-  const token = req.headers.authorization?.replace('Bearer ', '');
-  
-  if (!token) {
-    console.log('❌ Próba dostępu bez tokenu autoryzacji');
-    return res.status(401).json({
-      success: false,
-      message: 'Brak tokenu autoryzacji'
-    });
+// Middleware do weryfikacji sesji administratora (ciasteczko HttpOnly)
+const verifyAdminSession = (req, res, next) => {
+  const session = req.cookies?.admin_session;
+  if (!session) {
+    return res.status(401).json({ success: false, message: 'Brak sesji administratora' });
   }
-  
   try {
-    // Dekoduj token (w produkcji użyj JWT)
-    const decoded = Buffer.from(token, 'base64').toString();
+    const decoded = Buffer.from(session, 'base64').toString();
     const [username, timestamp] = decoded.split(':');
-    
     if (!username || !timestamp) {
-      console.log('❌ Nieprawidłowy format tokenu');
-      return res.status(401).json({
-        success: false,
-        message: 'Nieprawidłowy format tokenu'
-      });
+      return res.status(401).json({ success: false, message: 'Nieprawidłowa sesja' });
     }
-    
-    // Sprawdź czy token nie wygasł (24 godziny)
-    const tokenAge = Date.now() - parseInt(timestamp);
-    if (tokenAge > 24 * 60 * 60 * 1000) {
-      console.log(`❌ Token wygasł dla użytkownika: ${username}`);
-      return res.status(401).json({
-        success: false,
-        message: 'Token wygasł'
-      });
+    const tokenAge = Date.now() - parseInt(timestamp, 10);
+    if (Number.isNaN(tokenAge) || tokenAge > 24 * 60 * 60 * 1000) {
+      res.clearCookie('admin_session', cookieOptionsForClear());
+      return res.status(401).json({ success: false, message: 'Sesja wygasła' });
     }
-    
-    // Sprawdź czy użytkownik to arturrek23
-    if (username === 'arturrek23') {
+    if (username !== 'arturrek23') {
+      return res.status(403).json({ success: false, message: 'Brak uprawnień administratora' });
+    }
       req.adminUser = { username };
       next();
-    } else {
-      console.log(`❌ Próba dostępu z nieprawidłowym użytkownikiem: ${username}`);
-      return res.status(403).json({
-        success: false,
-        message: 'Brak uprawnień administratora'
-      });
-    }
   } catch (error) {
-    console.error('❌ Błąd podczas weryfikacji tokenu:', error);
-    return res.status(401).json({
-      success: false,
-      message: 'Nieprawidłowy token'
-    });
+    return res.status(401).json({ success: false, message: 'Nieprawidłowa sesja' });
   }
 };
 
@@ -1663,18 +1653,10 @@ app.post('/api/admin/login', async (req, res) => {
     
     // Sprawdź dane logowania
     if (username === 'arturrek23' && password === 'Wysocka11223344') {
-      // Generuj prosty token (w produkcji użyj JWT)
-      const token = Buffer.from(`${username}:${Date.now()}`).toString('base64');
-      
-      // Logowanie udanego logowania
+      const session = Buffer.from(`${username}:${Date.now()}`).toString('base64');
       logger.info('Admin login OK', { admin_id: username });
-      
-      res.json({
-        success: true,
-        token: token,
-        message: 'Zalogowano pomyślnie',
-        user: { username }
-      });
+      res.cookie('admin_session', session, cookieOptions());
+      res.json({ success: true, message: 'Zalogowano pomyślnie', user: { username } });
     } else {
       // Logowanie nieudanej próby logowania
       console.log(`❌ Nieudana próba logowania dla użytkownika: ${username}`);
@@ -1693,8 +1675,8 @@ app.post('/api/admin/login', async (req, res) => {
   }
 });
 
-// Endpoint weryfikacji tokenu administratora
-app.get('/api/admin/verify', verifyAdminToken, async (req, res) => {
+// Endpoint weryfikacji sesji administratora
+app.get('/api/admin/verify', verifyAdminSession, async (req, res) => {
   try {
     res.json({
       success: true,
@@ -1711,17 +1693,13 @@ app.get('/api/admin/verify', verifyAdminToken, async (req, res) => {
 });
 
 // Endpoint wylogowywania administratora
-app.post('/api/admin/logout', verifyAdminToken, async (req, res) => {
+app.post('/api/admin/logout', verifyAdminSession, async (req, res) => {
   try {
     // Logowanie wylogowania
     logger.info('Admin logout', { admin_id: req.adminUser.username });
     
-    // W tym prostym systemie token jest usuwany po stronie frontendu
-    // W produkcji można dodać blacklistę tokenów
-    res.json({
-      success: true,
-      message: 'Wylogowano pomyślnie'
-    });
+    res.clearCookie('admin_session', cookieOptionsForClear());
+    res.json({ success: true, message: 'Wylogowano pomyślnie' });
   } catch (error) {
     console.error('❌ Błąd podczas wylogowywania administratora:', error);
     res.status(500).json({
