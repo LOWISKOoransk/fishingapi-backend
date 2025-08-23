@@ -167,6 +167,25 @@ const DOMAIN_CONFIG = {
 async function testP24Connection() {
   try {
     console.log('🔧 Testuję połączenie z Przelewy24...');
+    
+    // Sprawdź czy wszystkie wymagane zmienne są ustawione
+    const requiredVars = {
+      'P24_MERCHANT_ID': process.env.P24_MERCHANT_ID,
+      'P24_POS_ID': process.env.P24_POS_ID,
+      'P24_SECRET_ID': process.env.P24_SECRET_ID || process.env.P24_REPORT_KEY,
+      'P24_CRC': process.env.P24_CRC,
+      'P24_SANDBOX': process.env.P24_SANDBOX
+    };
+    
+    console.log('📋 Sprawdzam zmienne środowiskowe:');
+    for (const [varName, varValue] of Object.entries(requiredVars)) {
+      if (varValue) {
+        console.log(`  ${varName}: ${varName.includes('SECRET') || varName.includes('CRC') ? '***' + varValue.slice(-4) : varValue} (OK)`);
+      } else {
+        console.log(`  ${varName}: BRAK ❌`);
+      }
+    }
+    
     console.log('📋 Używam danych:');
     console.log('  merchantId:', P24_CONFIG.merchantId, '(', typeof P24_CONFIG.merchantId, ')');
     console.log('  posId:', P24_CONFIG.posId, '(', typeof P24_CONFIG.posId, ')');
@@ -175,7 +194,14 @@ async function testP24Connection() {
     console.log('  sandbox:', P24_CONFIG.sandbox);
     console.log('  baseUrl:', P24_CONFIG.baseUrl);
     
-
+    // Sprawdź czy wszystkie wymagane zmienne są ustawione
+    const missingVars = Object.entries(requiredVars).filter(([_, value]) => !value);
+    if (missingVars.length > 0) {
+      console.error('❌ BRAKUJE WYMAGANYCH ZMIENNYCH ŚRODOWISKOWYCH:');
+      missingVars.forEach(([varName]) => console.error(`  - ${varName}`));
+      return null;
+    }
+    
     // Sprawdź IP z którego wysyłamy żądanie
     try {
       const ipResponse = await fetch('https://api.ipify.org?format=json');
@@ -186,7 +212,7 @@ async function testP24Connection() {
     }
     
     const auth = Buffer.from(`${P24_CONFIG.posId}:${P24_CONFIG.reportKey}`).toString('base64');
-    console.log('Authorization:', `Basic ${auth}`);
+    console.log('Authorization (pierwsze 20 znaków):', auth.substring(0, 20) + '...');
     
     const response = await fetch(`${P24_CONFIG.baseUrl}/testAccess`, {
       method: 'GET',
@@ -196,11 +222,34 @@ async function testP24Connection() {
       }
     });
     console.log('Status testu połączenia:', response.status);
+    
+    if (response.status !== 200) {
+      console.error('❌ Błąd testu połączenia - status:', response.status);
+      const errorText = await response.text();
+      console.error('Odpowiedź błędu:', errorText);
+      
+      if (response.status === 401) {
+        console.error('🔐 BŁĄD 401 - Incorrect authentication');
+        console.error('Sprawdź:');
+        console.error('  1. Czy P24_POS_ID jest poprawne');
+        console.error('  2. Czy P24_SECRET_ID jest poprawne');
+        console.error('  3. Czy klucze są aktywne w panelu P24');
+        console.error('  4. Czy P24_SANDBOX jest ustawione prawidłowo');
+      }
+      
+      return null;
+    }
+    
     const data = await response.json();
-    console.log('Odpowiedź testu:', JSON.stringify(data, null, 2));
+    console.log('✅ Odpowiedź testu OK:', JSON.stringify(data, null, 2));
     return data;
   } catch (error) {
-    console.error('Błąd testu połączenia:', error);
+    console.error('❌ Błąd testu połączenia:', error.message);
+    if (error.code === 'ENOTFOUND') {
+      console.error('   - Problem z DNS - sprawdź połączenie internetowe');
+    } else if (error.code === 'ECONNREFUSED') {
+      console.error('   - Połączenie odrzucone - sprawdź URL P24');
+    }
     return null;
   }
 }
@@ -4139,12 +4188,17 @@ app.get('/api/reservation/status/:token', async (req, res) => {
         const sessionId = reservation.payment_id;
         console.log('🔧 Polling - Używam sessionId:', sessionId);
         
+        // Debug autoryzacji
+        console.log('🔧 Polling - Debug autoryzacji:');
+        console.log('  posId:', P24_CONFIG.posId, '(', typeof P24_CONFIG.posId, ')');
+        console.log('  reportKey:', P24_CONFIG.reportKey ? '***' + P24_CONFIG.reportKey.slice(-4) : 'BRAK', '(', typeof P24_CONFIG.reportKey, ')');
+        
         const auth = Buffer.from(`${P24_CONFIG.posId}:${P24_CONFIG.reportKey}`).toString('base64');
         // PRAWIDŁOWY endpoint do sprawdzania statusu
         const url = `${P24_CONFIG.baseUrl}/transaction/by/sessionId/${sessionId}`;
         
         console.log('🌐 Polling - URL:', url);
-        console.log('🔑 Polling - Auth:', auth);
+        console.log('🔑 Polling - Auth (pierwsze 20 znaków):', auth.substring(0, 20) + '...');
         
         // Dodaj timeout dla fetch
         const controller = new AbortController();
@@ -4258,6 +4312,22 @@ app.get('/api/reservation/status/:token', async (req, res) => {
           console.log('❌ Polling - Nie udało się sprawdzić statusu płatności (status:', response.status, ')');
           const errorData = await response.text();
           console.log('Błąd z Przelewy24:', errorData);
+          
+          // Szczególna obsługa błędu 401 (Incorrect authentication)
+          if (response.status === 401) {
+            console.error('🔐 BŁĄD AUTORYZACJI P24 - Sprawdź:');
+            console.error('  1. Czy P24_POS_ID jest poprawne');
+            console.error('  2. Czy P24_SECRET_ID jest poprawne');
+            console.error('  3. Czy P24_SANDBOX jest ustawione prawidłowo');
+            console.error('  4. Czy klucze są aktywne w panelu P24');
+            
+            // Sprawdź czy wszystkie wymagane zmienne są ustawione
+            if (!P24_CONFIG.posId || !P24_CONFIG.reportKey) {
+              console.error('❌ BRAKUJE KLUCZY P24:');
+              console.error('  posId:', P24_CONFIG.posId ? 'OK' : 'BRAK');
+              console.error('  reportKey:', P24_CONFIG.reportKey ? 'OK' : 'BRAK');
+            }
+          }
         }
       } catch (error) {
         console.error('❌ Polling - Błąd podczas sprawdzania statusu płatności:', error);
@@ -4512,6 +4582,18 @@ app.listen(PORT, '0.0.0.0', async () => {
     }
   }, 5000);
   logger.info('Timer płatności uruchomiony', { interval_ms: 5000 });
+
+  // Test połączenia z P24 przy starcie serwera
+  console.log('🔧 Testuję połączenie z P24 przy starcie...');
+  testP24Connection().then(result => {
+    if (result) {
+      console.log('✅ Połączenie z P24 OK');
+    } else {
+      console.error('❌ Błąd połączenia z P24 - sprawdź konfigurację');
+    }
+  }).catch(error => {
+    console.error('❌ Błąd podczas testowania P24:', error.message);
+  });
 
   // Podsumowania co 30 minut
   setInterval(() => {
