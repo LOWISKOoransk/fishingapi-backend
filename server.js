@@ -723,8 +723,8 @@ function toPolishDate(dateString) {
   
   // Konwertuj z UTC na polską strefę czasową
   const date = new Date(dateString);
-  const polishDate = new Date(date.getTime() + (2 * 60 * 60 * 1000)); // +2h dla Polski
-  return polishDate.toLocaleDateString('en-CA'); // YYYY-MM-DD format
+  // Usunięto dodawanie 2 godzin - daty z bazy są już w lokalnej strefie czasowej
+  return date.toLocaleDateString('en-CA'); // YYYY-MM-DD format
 }
 
 function fromPolishDate(dateString) {
@@ -769,9 +769,8 @@ function formatDateForDisplay(dateString) {
   if (!dateString) return '';
   
   const date = new Date(dateString);
-  // Dodaj 2 godziny dla polskiej strefy czasowej
-  const polishDate = new Date(date.getTime() + (2 * 60 * 60 * 1000));
-  const result = polishDate.toLocaleDateString('en-CA'); // YYYY-MM-DD format
+  // Usunięto dodawanie 2 godzin - daty z bazy są już w lokalnej strefie czasowej
+  const result = date.toLocaleDateString('en-CA'); // YYYY-MM-DD format
   
   console.log('🔍 DEBUG formatDateForDisplay - WYNIK:', result);
   return result;
@@ -2368,31 +2367,15 @@ app.post('/api/reservations', async (req, res) => {
   const final_end_time = end_time || '10:00:00';
 
   // Naprawione przetwarzanie dat - konwertuj z lokalnej strefy czasowej na UTC
-  // DODATKOWO: dodaj jeden dzień do dat otrzymanych z frontendu, żeby kompensować błąd frontendu
+  // Usunięto nieprawidłowe dodawanie jednego dnia - daty z frontendu są już poprawne
   let dateFixed = parseFrontendDate(date);
   let endDateFixed = parseFrontendDate(end_date);
   
-  // Dodaj jeden dzień do obu dat, żeby kompensować błąd frontendu
-  if (dateFixed && endDateFixed) {
-    const [year, month, day] = dateFixed.split('-').map(Number);
-    const [endYear, endMonth, endDay] = endDateFixed.split('-').map(Number);
-    
-    // Dodaj jeden dzień
-    const adjustedDate = new Date(year, month - 1, day + 1);
-    const adjustedEndDate = new Date(endYear, endMonth - 1, endDay + 1);
-    
-    // Konwertuj z powrotem na format YYYY-MM-DD
-    dateFixed = adjustedDate.toISOString().split('T')[0];
-    endDateFixed = adjustedEndDate.toISOString().split('T')[0];
-    
-    console.log('🔍 DEBUG REZERWACJA - DATY PO KOREKCIE (+1 dzień):');
-    console.log('dateFixed (skorygowany):', dateFixed);
-    console.log('endDateFixed (skorygowany):', endDateFixed);
-  }
+  // Usunięto nieprawidłowe dodawanie jednego dnia - daty z frontendu są już poprawne
   
-  console.log('🔍 DEBUG REZERWACJA - DATY PO KONWERSJI I KOREKCIE:');
-  console.log('dateFixed (skorygowany):', dateFixed);
-  console.log('endDateFixed (skorygowany):', endDateFixed);
+  console.log('🔍 DEBUG REZERWACJA - DATY PO KONWERSJI:');
+  console.log('dateFixed:', dateFixed);
+  console.log('endDateFixed:', endDateFixed);
 
   // Obliczanie liczby dób hotelowych (11:00-10:00 następnego dnia)
   function parseYMD(str) {
@@ -2433,10 +2416,10 @@ app.post('/api/reservations', async (req, res) => {
   }
 
   try {
-    // DEBUG: Sprawdź co dokładnie jest wysyłane do bazy (po korekcie +1 dzień)
+    // DEBUG: Sprawdź co dokładnie jest wysyłane do bazy
     console.log('🔍 DEBUG REZERWACJA - WYSYŁANIE DO BAZY:');
-    console.log('date (przyjazd, skorygowany):', dateFixed);
-    console.log('end_date (wyjazd, skorygowany):', endDateFixed);
+    console.log('date (przyjazd):', dateFixed);
+    console.log('end_date (wyjazd):', endDateFixed);
     
     const dbPool = await checkDatabaseConnection();
     const [result] = await dbPool.query(
