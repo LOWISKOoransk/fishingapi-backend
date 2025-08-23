@@ -1338,7 +1338,6 @@ const cookieOptions = (origin) => ({
   httpOnly: true,
   secure: isSecureOrigin(origin),
   sameSite: isSecureOrigin(origin) ? 'none' : 'lax',
-  ...(isSecureOrigin(origin) ? { partitioned: true } : {}),
   path: '/',
   maxAge: 24 * 60 * 60 * 1000
 });
@@ -1346,9 +1345,38 @@ const cookieOptionsForClear = (origin) => ({
   httpOnly: true,
   secure: isSecureOrigin(origin),
   sameSite: isSecureOrigin(origin) ? 'none' : 'lax',
-  ...(isSecureOrigin(origin) ? { partitioned: true } : {}),
   path: '/'
 });
+
+function buildAdminSessionCookie(value, origin) {
+  const opts = cookieOptions(origin);
+  const attrs = [
+    `admin_session=${value}`,
+    'Path=/',
+    `Max-Age=${opts.maxAge / 1000}`,
+    'HttpOnly'
+  ];
+  if (opts.secure) attrs.push('Secure');
+  if (opts.sameSite === 'none') attrs.push('SameSite=None');
+  // Wymuś Partitioned dla cross-site CHIPS, jeśli secure
+  if (opts.secure) attrs.push('Partitioned');
+  return attrs.join('; ');
+}
+
+function buildAdminSessionClearCookie(origin) {
+  const opts = cookieOptionsForClear(origin);
+  const attrs = [
+    'admin_session=;',
+    'Path=/',
+    'Max-Age=0',
+    'Expires=Thu, 01 Jan 1970 00:00:00 GMT',
+    'HttpOnly'
+  ];
+  if (opts.secure) attrs.push('Secure');
+  if (opts.sameSite === 'none') attrs.push('SameSite=None');
+  if (opts.secure) attrs.push('Partitioned');
+  return attrs.join('; ');
+}
 
 // Konfiguracja CORS - pozwól na żądania z frontendu (również www i lokalne)
 const allowedOrigins = [
@@ -1641,7 +1669,8 @@ const verifyAdminSession = (req, res, next) => {
     }
     const tokenAge = Date.now() - parseInt(timestamp, 10);
     if (Number.isNaN(tokenAge) || tokenAge > 24 * 60 * 60 * 1000) {
-      res.clearCookie('admin_session', cookieOptionsForClear(req.headers.origin));
+      // Czyść cookie ręcznie, zachowując atrybuty
+      res.setHeader('Set-Cookie', buildAdminSessionClearCookie(req.headers.origin));
       return res.status(401).json({ success: false, message: 'Sesja wygasła' });
     }
     if (username !== 'arturrek23') {
@@ -1671,7 +1700,8 @@ app.post('/api/admin/login', async (req, res) => {
     if (username === 'arturrek23' && password === 'Wysocka11223344') {
       const session = Buffer.from(`${username}:${Date.now()}`).toString('base64');
       logger.info('Admin login OK', { admin_id: username });
-      res.cookie('admin_session', session, cookieOptions(req.headers.origin));
+      // Ustaw cookie ręcznie, aby dodać Partitioned
+      res.setHeader('Set-Cookie', buildAdminSessionCookie(session, req.headers.origin));
       res.json({ success: true, message: 'Zalogowano pomyślnie', user: { username } });
     } else {
       // Logowanie nieudanej próby logowania
@@ -1714,7 +1744,8 @@ app.post('/api/admin/logout', verifyAdminSession, async (req, res) => {
     // Logowanie wylogowania
     logger.info('Admin logout', { admin_id: req.adminUser.username });
     
-    res.clearCookie('admin_session', cookieOptionsForClear(req.headers.origin));
+    // Czyść cookie ręcznie, zachowując atrybuty
+    res.setHeader('Set-Cookie', buildAdminSessionClearCookie(req.headers.origin));
     res.json({ success: true, message: 'Wylogowano pomyślnie' });
   } catch (error) {
     console.error('❌ Błąd podczas wylogowywania administratora:', error);
