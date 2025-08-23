@@ -137,7 +137,7 @@ testEmailSending();
 // Konfiguracja Przelewy24 – sekrety pobierane z ENV (NIE commituj prawdziwych kluczy)
 const P24_CONFIG = {
   merchantId: Number(process.env.P24_MERCHANT_ID),
-  posId: Number(process.env.P24_POS_ID), // ✅ Poprawione - posId powinno być Number dla API
+  posId: String(process.env.P24_POS_ID), // Zmienione na String dla autoryzacji
   apiKey: process.env.P24_API_KEY,
   crc: process.env.P24_CRC,
   // SecretId (alias reportKey) – używany do Basic Auth w raportach/verify
@@ -166,42 +166,13 @@ const DOMAIN_CONFIG = {
 // Test połączenia z sandbox Przelewy24
 async function testP24Connection() {
   try {
-    console.log('🔧 Testuję połączenie z Przelewy24...');
-    
-    // Sprawdź czy wszystkie wymagane zmienne są ustawione
-    const requiredVars = {
-      'P24_MERCHANT_ID': process.env.P24_MERCHANT_ID,
-      'P24_POS_ID': process.env.P24_POS_ID,
-      'P24_SECRET_ID': process.env.P24_SECRET_ID || process.env.P24_REPORT_KEY,
-      'P24_CRC': process.env.P24_CRC,
-      'P24_SANDBOX': process.env.P24_SANDBOX
-    };
-    
-    console.log('📋 Sprawdzam zmienne środowiskowe:');
-    for (const [varName, varValue] of Object.entries(requiredVars)) {
-      if (varValue) {
-        console.log(`  ${varName}: ${varName.includes('SECRET') || varName.includes('CRC') ? '***' + varValue.slice(-4) : varValue} (OK)`);
-      } else {
-        console.log(`  ${varName}: BRAK ❌`);
-      }
-    }
-    
-    console.log('📋 Używam danych:');
-    console.log('  merchantId:', P24_CONFIG.merchantId, '(', typeof P24_CONFIG.merchantId, ')');
-    console.log('  posId:', P24_CONFIG.posId, '(', typeof P24_CONFIG.posId, ')');
-    console.log('  reportKey:', P24_CONFIG.reportKey ? '***' + P24_CONFIG.reportKey.slice(-4) : 'BRAK', '(', typeof P24_CONFIG.reportKey, ')');
-    console.log('  crc:', P24_CONFIG.crc ? '***' + P24_CONFIG.crc.slice(-4) : 'BRAK', '(', typeof P24_CONFIG.crc, ')');
-    console.log('  sandbox:', P24_CONFIG.sandbox);
+    console.log('Testuję połączenie z sandbox Przelewy24...');
+    console.log('Używam danych:');
+    console.log('  posId:', P24_CONFIG.posId);
+    console.log('  reportKey:', P24_CONFIG.reportKey);
     console.log('  baseUrl:', P24_CONFIG.baseUrl);
     
-    // Sprawdź czy wszystkie wymagane zmienne są ustawione
-    const missingVars = Object.entries(requiredVars).filter(([_, value]) => !value);
-    if (missingVars.length > 0) {
-      console.error('❌ BRAKUJE WYMAGANYCH ZMIENNYCH ŚRODOWISKOWYCH:');
-      missingVars.forEach(([varName]) => console.error(`  - ${varName}`));
-      return null;
-    }
-    
+
     // Sprawdź IP z którego wysyłamy żądanie
     try {
       const ipResponse = await fetch('https://api.ipify.org?format=json');
@@ -212,86 +183,21 @@ async function testP24Connection() {
     }
     
     const auth = Buffer.from(`${P24_CONFIG.posId}:${P24_CONFIG.reportKey}`).toString('base64');
-    console.log('Authorization (pierwsze 20 znaków):', auth.substring(0, 20) + '...');
+    console.log('Authorization:', `Basic ${auth}`);
     
-    // Używamy standardowego endpointu testowego
-    const testUrl = `${P24_CONFIG.baseUrl}/testAccess`;
-    console.log('🌐 Testuję połączenie z URL:', testUrl);
-    
-    // Dla produkcji P24 może wymagać innego formatu autoryzacji
-    const headers = {
-      'Content-Type': 'application/json'
-    };
-    
-    if (P24_CONFIG.sandbox) {
-      headers['Authorization'] = `Basic ${auth}`;
-    } else {
-      // Dla produkcji używamy alternatywnej metody autoryzacji
-      headers['Authorization'] = `Basic ${auth}`;
-      // Dodaj dodatkowe nagłówki dla produkcji
-      headers['X-P24-Merchant-Id'] = P24_CONFIG.merchantId;
-      headers['X-P24-Pos-Id'] = P24_CONFIG.posId;
-    }
-    
-    console.log('🔐 Używam nagłówków:', Object.keys(headers));
-    
-    const response = await fetch(testUrl, {
+    const response = await fetch(`${P24_CONFIG.baseUrl}/testAccess`, {
       method: 'GET',
-      headers: headers
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Basic ${auth}`
+      }
     });
     console.log('Status testu połączenia:', response.status);
-    
-    if (response.status !== 200) {
-      console.error('❌ Błąd testu połączenia - status:', response.status);
-      const errorText = await response.text();
-      console.error('Odpowiedź błędu:', errorText);
-      
-          if (response.status === 401) {
-      console.error('🔐 BŁĄD 401 - Incorrect authentication');
-      console.error('Sprawdź:');
-      console.error('  1. Czy P24_POS_ID jest poprawne');
-      console.error('  2. Czy P24_SECRET_ID jest poprawne');
-      console.error('  3. Czy klucze są aktywne w panelu P24');
-      console.error('  4. Czy P24_SANDBOX jest ustawione prawidłowo');
-      console.error('  5. Czy IP serwera (44.229.227.142) jest na białej liście w panelu P24');
-      console.error('  6. Czy endpoint /testAccess jest dostępny dla produkcji');
-      
-      // Spróbuj alternatywny endpoint dla produkcji
-      if (!P24_CONFIG.sandbox) {
-        console.log('🔄 Próbuję alternatywny endpoint dla produkcji...');
-        try {
-          const altUrl = 'https://secure.przelewy24.pl/api/v1/testAccess';
-          console.log('🌐 Próbuję URL:', altUrl);
-          
-          const altResponse = await fetch(altUrl, {
-            method: 'GET',
-            headers: headers
-          });
-          
-          console.log('🔄 Alternatywny endpoint - status:', altResponse.status);
-          if (altResponse.status === 200) {
-            console.log('✅ Alternatywny endpoint działa!');
-            return await altResponse.json();
-          }
-        } catch (altError) {
-          console.log('❌ Alternatywny endpoint też nie działa:', altError.message);
-        }
-      }
-    }
-      
-      return null;
-    }
-    
     const data = await response.json();
-    console.log('✅ Odpowiedź testu OK:', JSON.stringify(data, null, 2));
+    console.log('Odpowiedź testu:', JSON.stringify(data, null, 2));
     return data;
   } catch (error) {
-    console.error('❌ Błąd testu połączenia:', error.message);
-    if (error.code === 'ENOTFOUND') {
-      console.error('   - Problem z DNS - sprawdź połączenie internetowe');
-    } else if (error.code === 'ECONNREFUSED') {
-      console.error('   - Połączenie odrzucone - sprawdź URL P24');
-    }
+    console.error('Błąd testu połączenia:', error);
     return null;
   }
 }
@@ -395,23 +301,9 @@ function generateP24Signature(params) {
     crc: P24_CONFIG.crc
   };
   
-  // Debug podpisu
-  console.log('🔐 Generuję podpis P24:');
-  console.log('   signParams:', signParams);
-  console.log('   merchantId type:', typeof merchantId, 'value:', merchantId);
-  console.log('   sessionId type:', typeof sessionId, 'value:', sessionId);
-  console.log('   amount type:', typeof amount, 'value:', amount);
-  console.log('   currency type:', typeof currency, 'value:', currency);
-  console.log('   crc type:', typeof P24_CONFIG.crc, 'value:', P24_CONFIG.crc ? '***' + P24_CONFIG.crc.slice(-4) : 'BRAK');
-  
   // JSON z flagami zgodnie z dokumentacją
   const jsonString = JSON.stringify(signParams);
-  console.log('   JSON string:', jsonString);
-  
-  const signature = crypto.createHash('sha384').update(jsonString).digest('hex');
-  console.log('   Generated signature:', signature.substring(0, 20) + '...');
-  
-  return signature;
+  return crypto.createHash('sha384').update(jsonString).digest('hex');
 }
 
 // Suma kontrolna dla rejestracji transakcji
@@ -431,11 +323,11 @@ function calculateRegistrationSign(sessionId, amount, currency = 'PLN') {
 // Suma kontrolna dla weryfikacji transakcji
 function calculateVerificationSign(sessionId, orderId, amount, currency = 'PLN') {
   const params = {
-    sessionId: String(sessionId),
-    orderId: Number(orderId),
-    amount: Number(amount),
-    currency: String(currency),
-    crc: String(P24_CONFIG.crc)
+    sessionId: sessionId,
+    orderId: orderId,
+    amount: amount,
+    currency: currency,
+    crc: P24_CONFIG.crc
   };
   
   const jsonString = JSON.stringify(params, null, 0);
@@ -469,12 +361,12 @@ function generateUniqueSessionId() {
 // Funkcja weryfikacji transakcji
 async function verifyTransaction(sessionId, orderId, amount, currency = 'PLN') {
   const verificationData = {
-    merchantId: Number(P24_CONFIG.merchantId),
-    posId: Number(P24_CONFIG.posId),
+    merchantId: P24_CONFIG.merchantId,
+    posId: P24_CONFIG.posId,
     sessionId: sessionId,
-    amount: Number(amount),
+    amount: amount,
     currency: currency,
-    orderId: Number(orderId),
+    orderId: orderId,
     sign: calculateVerificationSign(sessionId, orderId, amount, currency)
   };
 
@@ -493,14 +385,7 @@ async function verifyTransaction(sessionId, orderId, amount, currency = 'PLN') {
   if (response.status === 200) {
     logger.info('P24 verify ok', { sessionId, orderId });
   } else {
-    logger.error('P24 verify fail', { 
-      sessionId, 
-      orderId, 
-      status: response.status, 
-      responseData: result,
-      verificationData: verificationData,
-      authHeader: `Basic ${Buffer.from(`${P24_CONFIG.posId}:${P24_CONFIG.reportKey}`).toString('base64').substring(0, 20)}...`
-    });
+    logger.error('P24 verify fail', { sessionId, orderId, status: response.status });
     try { metrics.p24.verifyFail++; } catch {}
   }
   return result;
@@ -511,12 +396,12 @@ async function createP24Payment(reservation, amount) {
   const amountInGrosz = Math.round(amount * 100); // Konwersja na grosze
   
   const p24Params = {
-    merchantId: Number(P24_CONFIG.merchantId),
-    posId: Number(P24_CONFIG.posId),
+    merchantId: parseInt(P24_CONFIG.merchantId),
+    posId: Number(P24_CONFIG.posId), // Konwertuj string z powrotem na liczbę dla API
     sessionId: sessionId,
     amount: amountInGrosz,
     currency: 'PLN',
-    description: `Rezerwacja ID: ${reservation.id} - Stanowisko ${reservation.spot_id} - ${new Date(reservation.date).toLocaleDateString('pl-PL')}`,
+          description: `Rezerwacja ID: ${reservation.id} - Stanowisko ${reservation.spot_id} - ${new Date(reservation.date).toLocaleDateString('pl-PL')}`,
     email: reservation.email,
     country: 'PL',
     urlReturn: `${DOMAIN_CONFIG.frontend}/payment/return/${reservation.token}?fromPayment=true`,
@@ -533,15 +418,12 @@ async function createP24Payment(reservation, amount) {
   // Generuj podpis dla /api/v1/transaction/register
   p24Params.sign = generateP24Signature(p24Params);
   
-  console.log('🚀 PRZELEWY24 - Wysyłam transakcję:');
-  console.log('   sessionId:', p24Params.sessionId);
-  console.log('   amount:', p24Params.amount, 'groszy');
-  console.log('   timeLimit:', p24Params.timeLimit, 'minut ⏰');
-  console.log('   email:', p24Params.email);
-  console.log('   URL:', `${P24_CONFIG.baseUrl}/transaction/register`);
-  console.log('   merchantId:', p24Params.merchantId, '(', typeof p24Params.merchantId, ')');
-  console.log('   posId:', p24Params.posId, '(', typeof p24Params.posId, ')');
-  console.log('   sign:', p24Params.sign.substring(0, 20) + '...');
+      console.log('🚀 PRZELEWY24 - Wysyłam transakcję:');
+    console.log('   sessionId:', p24Params.sessionId);
+    console.log('   amount:', p24Params.amount, 'groszy');
+    console.log('   timeLimit:', p24Params.timeLimit, 'minut ⏰');
+    console.log('   email:', p24Params.email);
+    console.log('   URL:', `${P24_CONFIG.baseUrl}/transaction/register`);
   
   try {
     logger.info('P24 register start', {
@@ -554,28 +436,12 @@ async function createP24Payment(reservation, amount) {
     const authString = `${P24_CONFIG.posId}:${P24_CONFIG.reportKey}`;
     const authHeader = `Basic ${Buffer.from(authString).toString('base64')}`;
     
-    // Dla produkcji P24 może wymagać dodatkowych nagłówków
-    const headers = {
-      'Content-Type': 'application/json',
-      'Authorization': authHeader
-    };
-    
-    if (!P24_CONFIG.sandbox) {
-      // Dla produkcji dodaj dodatkowe nagłówki
-      headers['X-P24-Merchant-Id'] = P24_CONFIG.merchantId;
-      headers['X-P24-Pos-Id'] = P24_CONFIG.posId;
-      
-      // Alternatywna metoda autoryzacji dla produkcji
-      console.log('🔄 Próbuję alternatywną metodę autoryzacji dla produkcji...');
-    }
-    
-    console.log('🔐 P24 Headers:', Object.keys(headers));
-    console.log('🔐 Auth string:', authString);
-    console.log('🔐 Auth header (pierwsze 20):', authHeader.substring(0, 20) + '...');
-    
     const response = await fetch(`${P24_CONFIG.baseUrl}/transaction/register`, {
       method: 'POST',
-      headers: headers,
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': authHeader
+      },
       body: JSON.stringify(p24Params)
     });
     
@@ -584,26 +450,7 @@ async function createP24Payment(reservation, amount) {
     // Sprawdź odpowiedź
     if (response.status !== 200) {
       const errorData = await response.json();
-      logger.error('P24 register fail', { 
-        sessionId, 
-        status: response.status, 
-        error: errorData.error || 'Unknown',
-        url: `${P24_CONFIG.baseUrl}/transaction/register`,
-        headers: Object.keys(headers),
-        authHeader: authHeader.substring(0, 20) + '...'
-      });
-      
-      // Szczególna obsługa błędu 401
-      if (response.status === 401) {
-        console.error('🔐 BŁĄD 401 w createP24Payment - Incorrect authentication');
-        console.error('Sprawdź:');
-        console.error('  1. Czy P24_POS_ID jest poprawne:', P24_CONFIG.posId);
-        console.error('  2. Czy P24_SECRET_ID jest poprawne:', P24_CONFIG.reportKey ? '***' + P24_CONFIG.reportKey.slice(-4) : 'BRAK');
-        console.error('  3. Czy klucze są aktywne w panelu P24');
-        console.error('  4. Czy IP serwera jest na białej liście');
-        console.error('  5. Czy endpoint /transaction/register jest dostępny');
-      }
-      
+      logger.error('P24 register fail', { sessionId, status: response.status, error: errorData.error || 'Unknown' });
       try { metrics.p24.errors++; } catch {}
       throw new Error(`Błąd Przelewy24: ${errorData.error || 'Nieznany błąd'}`);
     }
@@ -3410,14 +3257,6 @@ app.post('/api/create-payment', async (req, res) => {
   try {
     console.log('🚀 Tworzę płatność Przelewy24');
     console.log('📦 Dane płatności:', { sessionId, amount, description, email, client });
-    
-    // Sprawdź czy wszystkie wymagane zmienne P24 są ustawione
-    console.log('🔍 Sprawdzam zmienne środowiskowe P24:');
-    console.log('  P24_MERCHANT_ID:', process.env.P24_MERCHANT_ID ? 'OK' : 'BRAK');
-    console.log('  P24_POS_ID:', process.env.P24_POS_ID ? 'OK' : 'BRAK');
-    console.log('  P24_SECRET_ID:', process.env.P24_SECRET_ID ? 'OK' : 'BRAK');
-    console.log('  P24_CRC:', process.env.P24_CRC ? 'OK' : 'BRAK');
-    console.log('  P24_SANDBOX:', process.env.P24_SANDBOX);
 
     const dbPool = await checkDatabaseConnection();
 
@@ -3445,21 +3284,13 @@ app.post('/api/create-payment', async (req, res) => {
     console.log('🔑 Wygenerowany sessionId:', uniqueSessionId);
 
   const merchantId = P24_CONFIG.merchantId;
-  const posId = P24_CONFIG.posId;  // ✅ Poprawione - używamy P24_CONFIG.posId
+  const posId = merchantId;
   const currency = "PLN";
   const country = "PL";
   const language = "pl";
 
     // Generuj podpis dla rejestracji
     const sign = calculateRegistrationSign(uniqueSessionId, amount, currency);
-    
-    // Debug: sprawdź czy podpis jest zgodny z danymi
-    console.log('🔍 Debug podpisu:');
-    console.log('  sessionId w podpisie:', uniqueSessionId);
-    console.log('  amount w podpisie:', amount);
-    console.log('  currency w podpisie:', currency);
-    console.log('  merchantId w podpisie:', P24_CONFIG.merchantId);
-    console.log('  crc w podpisie:', P24_CONFIG.crc ? '***' + P24_CONFIG.crc.slice(-4) : 'BRAK');
 
   const auth = Buffer.from(`${P24_CONFIG.posId}:${P24_CONFIG.reportKey}`).toString("base64");
 
@@ -3471,51 +3302,29 @@ app.post('/api/create-payment', async (req, res) => {
       auth: auth
     });
     
-    console.log('🔍 Wartości z konfiguracji P24:');
-    console.log('  P24_CONFIG.merchantId:', P24_CONFIG.merchantId, '(', typeof P24_CONFIG.merchantId, ')');
-    console.log('  P24_CONFIG.posId:', P24_CONFIG.posId, '(', typeof P24_CONFIG.posId, ')');
-    console.log('  P24_CONFIG.reportKey:', P24_CONFIG.reportKey ? '***' + P24_CONFIG.reportKey.slice(-4) : 'BRAK', '(', typeof P24_CONFIG.reportKey, ')');
-    console.log('  P24_CONFIG.crc:', P24_CONFIG.crc ? '***' + P24_CONFIG.crc.slice(-4) : 'BRAK', '(', typeof P24_CONFIG.crc, ')');
-    
-    console.log('🔍 Typy danych w transactionData:', {
-      merchantId: typeof merchantId,
-      posId: typeof posId,
-      sessionId: typeof uniqueSessionId,
-      amount: typeof amount,
-      currency: typeof currency
-    });
-    
     console.log('📝 Podpis rejestracji:', sign);
 
     const transactionData = {
-      merchantId: Number(merchantId),
-      posId: Number(posId),
-      sessionId: String(uniqueSessionId),
-      amount: Number(amount),  // ✅ Upewniamy się, że amount to liczba
-      currency: String(currency),
-      description: String(description),
-      email: String(email),
-      client: String(client),
-      country: String(country),
-      language: String(language),
-      urlReturn: `${DOMAIN_CONFIG.frontend}/payment/return/${token}?fromPayment=true`,
-      urlStatus: `${DOMAIN_CONFIG.backend}/api/payment/p24/status`,
-      sign: String(sign),
-      timeLimit: Number(5)
+    merchantId,
+    posId,
+      sessionId: uniqueSessionId,
+    amount,
+    currency,
+    description,
+    email,
+    client,
+    country,
+    language,
+    urlReturn: `${DOMAIN_CONFIG.frontend}/payment/return/${token}?fromPayment=true`,
+    urlStatus: `${DOMAIN_CONFIG.backend}/api/payment/p24/status`,
+    sign,
+    timeLimit: 5
     };
 
     console.log('📤 Wysyłam żądanie rejestracji:', {
       url: `${P24_CONFIG.baseUrl}/transaction/register`,
       data: transactionData
     });
-    
-    console.log('🔍 Szczegóły danych przed wysłaniem:');
-    console.log('  merchantId:', merchantId, '(', typeof merchantId, ')');
-    console.log('  posId:', posId, '(', typeof posId, ')');
-    console.log('  sessionId:', uniqueSessionId, '(', typeof uniqueSessionId, ')');
-    console.log('  amount:', amount, '(', typeof amount, ')');
-    console.log('  currency:', currency, '(', typeof currency, ')');
-    console.log('  sign:', sign.substring(0, 20) + '...');
 
     // Dodaj timeout dla fetch
     const controller = new AbortController();
@@ -4320,17 +4129,12 @@ app.get('/api/reservation/status/:token', async (req, res) => {
         const sessionId = reservation.payment_id;
         console.log('🔧 Polling - Używam sessionId:', sessionId);
         
-        // Debug autoryzacji
-        console.log('🔧 Polling - Debug autoryzacji:');
-        console.log('  posId:', P24_CONFIG.posId, '(', typeof P24_CONFIG.posId, ')');
-        console.log('  reportKey:', P24_CONFIG.reportKey ? '***' + P24_CONFIG.reportKey.slice(-4) : 'BRAK', '(', typeof P24_CONFIG.reportKey, ')');
-        
         const auth = Buffer.from(`${P24_CONFIG.posId}:${P24_CONFIG.reportKey}`).toString('base64');
         // PRAWIDŁOWY endpoint do sprawdzania statusu
         const url = `${P24_CONFIG.baseUrl}/transaction/by/sessionId/${sessionId}`;
         
         console.log('🌐 Polling - URL:', url);
-        console.log('🔑 Polling - Auth (pierwsze 20 znaków):', auth.substring(0, 20) + '...');
+        console.log('🔑 Polling - Auth:', auth);
         
         // Dodaj timeout dla fetch
         const controller = new AbortController();
@@ -4444,22 +4248,6 @@ app.get('/api/reservation/status/:token', async (req, res) => {
           console.log('❌ Polling - Nie udało się sprawdzić statusu płatności (status:', response.status, ')');
           const errorData = await response.text();
           console.log('Błąd z Przelewy24:', errorData);
-          
-          // Szczególna obsługa błędu 401 (Incorrect authentication)
-          if (response.status === 401) {
-            console.error('🔐 BŁĄD AUTORYZACJI P24 - Sprawdź:');
-            console.error('  1. Czy P24_POS_ID jest poprawne');
-            console.error('  2. Czy P24_SECRET_ID jest poprawne');
-            console.error('  3. Czy P24_SANDBOX jest ustawione prawidłowo');
-            console.error('  4. Czy klucze są aktywne w panelu P24');
-            
-            // Sprawdź czy wszystkie wymagane zmienne są ustawione
-            if (!P24_CONFIG.posId || !P24_CONFIG.reportKey) {
-              console.error('❌ BRAKUJE KLUCZY P24:');
-              console.error('  posId:', P24_CONFIG.posId ? 'OK' : 'BRAK');
-              console.error('  reportKey:', P24_CONFIG.reportKey ? 'OK' : 'BRAK');
-            }
-          }
         }
       } catch (error) {
         console.error('❌ Polling - Błąd podczas sprawdzania statusu płatności:', error);
@@ -4714,18 +4502,6 @@ app.listen(PORT, '0.0.0.0', async () => {
     }
   }, 5000);
   logger.info('Timer płatności uruchomiony', { interval_ms: 5000 });
-
-  // Test połączenia z P24 przy starcie serwera
-  console.log('🔧 Testuję połączenie z P24 przy starcie...');
-  testP24Connection().then(result => {
-    if (result) {
-      console.log('✅ Połączenie z P24 OK');
-    } else {
-      console.error('❌ Błąd połączenia z P24 - sprawdź konfigurację');
-    }
-  }).catch(error => {
-    console.error('❌ Błąd podczas testowania P24:', error.message);
-  });
 
   // Podsumowania co 30 minut
   setInterval(() => {
