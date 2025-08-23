@@ -1,4 +1,3 @@
-
 // Uruchom backend poleceniem: node server.js
 require('dotenv').config();
 const express = require('express');
@@ -8,6 +7,7 @@ const { v4: uuidv4 } = require('uuid');
 const { Resend } = require('resend');
 const crypto = require('crypto');
 const axios = require('axios');
+const { logger, requestIdMiddleware } = require('./logger');
 
 // Inicjalizacja Resend (wymaga RESEND_API_KEY w env)
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
@@ -124,10 +124,9 @@ async function testEmailSending() {
       subject: 'Test email - Łowisko Młyn Rańsk',
       html: '<h1>Test email</h1><p>To jest test wysyłania emaila.</p>'
     });
-    console.log('✅ Test email wysłany pomyślnie');
+    logger.info('Email test sent');
   } catch (error) {
-    console.error('❌ Błąd testu emaila:', error.message);
-    console.log('⚠️ Serwer uruchomi się bez testu emaila');
+    logger.error('Email test error', { message: error.message });
   }
 }
 
@@ -370,7 +369,7 @@ async function verifyTransaction(sessionId, orderId, amount, currency = 'PLN') {
     sign: calculateVerificationSign(sessionId, orderId, amount, currency)
   };
 
-  console.log('🔐 Weryfikuję transakcję:', verificationData);
+  logger.info('P24 verify start', { sessionId, orderId, amount, currency });
 
   const response = await fetch(`${P24_CONFIG.baseUrl}/transaction/verify`, {
     method: 'PUT',
@@ -382,7 +381,12 @@ async function verifyTransaction(sessionId, orderId, amount, currency = 'PLN') {
   });
 
   const result = await response.json();
-  console.log('📋 Wynik weryfikacji:', result);
+  if (response.status === 200) {
+    logger.info('P24 verify ok', { sessionId, orderId });
+  } else {
+    logger.error('P24 verify fail', { sessionId, orderId, status: response.status });
+    try { metrics.p24.verifyFail++; } catch {}
+  }
   return result;
 }
 
@@ -421,6 +425,12 @@ async function createP24Payment(reservation, amount) {
     console.log('   URL:', `${P24_CONFIG.baseUrl}/transaction/register`);
   
   try {
+    logger.info('P24 register start', {
+      reservation_id: reservation.id,
+      sessionId,
+      amount_grosz: amountInGrosz,
+      currency: 'PLN'
+    });
     // Użyj nowego API /api/v1/transaction/register
     const authString = `${P24_CONFIG.posId}:${P24_CONFIG.reportKey}`;
     const authHeader = `Basic ${Buffer.from(authString).toString('base64')}`;
@@ -434,22 +444,22 @@ async function createP24Payment(reservation, amount) {
       body: JSON.stringify(p24Params)
     });
     
-    console.log('📡 Status odpowiedzi Przelewy24:', response.status);
+    logger.debug('P24 response meta', { url: `${P24_CONFIG.baseUrl}/transaction/register`, status: response.status });
     
     // Sprawdź odpowiedź
     if (response.status !== 200) {
       const errorData = await response.json();
-      console.log('❌ Błąd Przelewy24:', errorData.error || 'Nieznany błąd');
+      logger.error('P24 register fail', { sessionId, status: response.status, error: errorData.error || 'Unknown' });
+      try { metrics.p24.errors++; } catch {}
       throw new Error(`Błąd Przelewy24: ${errorData.error || 'Nieznany błąd'}`);
     }
     
     const data = await response.json();
-    console.log('✅ Transakcja utworzona pomyślnie!');
-    console.log('   Token płatności:', data.data?.token);
-    console.log('   Pełna odpowiedź:', JSON.stringify(data, null, 2));
+    logger.info('P24 register ok', { sessionId, orderToken: data.data?.token });
     return data;
   } catch (error) {
-    console.error('Błąd podczas tworzenia płatności Przelewy24:', error);
+    logger.error('P24 register exception', { sessionId, message: error.message });
+    try { metrics.p24.errors++; } catch {}
     throw error;
   }
 }
@@ -491,6 +501,7 @@ async function checkPaymentStatuses() {
               // Sprawdź czy płatność została zrealizowana
               // Status 1 = udana płatność, Status 0 = oczekująca
               if (paymentData.data && paymentData.data.status === 1) { // 1 = udana płatność
+                logger.info('P24 callback/polling wynik', { sessionId: reservation.payment_id, status: 'success', orderId: paymentData.data.orderId });
                 // Zmień status na "opłacona"
                 await dbPool.query(
                   'UPDATE reservations SET status = ?, updated_at = NOW() WHERE id = ?',
@@ -528,7 +539,7 @@ async function checkPaymentStatuses() {
                       [reservation.spot_id, blockDate, 'paid_reservation']
                     );
                   } catch (error) {
-                    console.error(`❌ Błąd podczas zmiany source blokady:`, error);
+                    logger.error('ERROR | BLOCK_SQL_ERROR', { initiator: 'polling', reason: 'payment_verified', sql_op: 'delete/insert', error_code: error.code, message: error.message });
                   }
                 }
                 
@@ -536,10 +547,10 @@ async function checkPaymentStatuses() {
                 await sendPaymentConfirmationEmail(reservation);
               }
             } else {
-              console.error('❌ Nie udało się sprawdzić statusu płatności');
+              logger.warn('P24 polling HTTP status', { status: response.status });
             }
           } catch (error) {
-            console.error('❌ Błąd podczas sprawdzania statusu płatności:', error);
+            logger.error('P24 polling exception', { message: error.message });
           }
         }
       }
@@ -608,7 +619,7 @@ async function checkAndUpdateReservationStatuses() {
                 [reservation.spot_id, blockDate, 'reservation']
               );
             } catch (error) {
-              console.error(`❌ Błąd podczas usuwania blokady:`, error);
+              logger.error('ERROR | BLOCK_SQL_ERROR', { initiator: 'timer', reason: 'timeout_cleanup', sql_op: 'delete', error_code: error.code, message: error.message });
             }
           }
           
@@ -682,7 +693,7 @@ async function checkAndUpdateReservationStatuses() {
                 [reservation.spot_id, blockDate, 'reservation']
               );
             } catch (error) {
-              console.error(`❌ Błąd podczas usuwania blokady:`, error);
+              logger.error('ERROR | BLOCK_SQL_ERROR', { initiator: 'timer', reason: 'timeout_cleanup', sql_op: 'delete', error_code: error.code, message: error.message });
             }
           }
         }
@@ -847,18 +858,14 @@ async function sendReservationEmail(reservation) {
       subject: 'Rezerwacja utworzona - czeka na płatność - Łowisko Młyn Rańsk',
       html: html
     });
-    
-    console.log('📧 Email wysłany - rezerwacja utworzona dla:', reservation.email);
-    
-    console.log('Email z potwierdzeniem wysłany do:', reservation.email);
+    logger.info('Email sent: reservation created', { reservation_id: reservation.id });
   } catch (error) {
-    console.error('Błąd podczas wysyłania emaila:', error);
+    logger.error('Email send error: reservation created', { message: error.message });
   }
 }
 
 async function sendPaymentConfirmationEmail(reservation) {
-  console.log(`DEBUG: Rozpoczynam wysyłanie emaila z potwierdzeniem płatności`);
-  console.log(`DEBUG: Dane rezerwacji:`, reservation);
+  logger.info('Send payment confirmation email start', { reservation_id: reservation.id });
   try {
     const cancelUrl = `${DOMAIN_CONFIG.frontend}/rezerwacja/${reservation.token}`;
     const transactionDate = new Date().toLocaleString('pl-PL');
@@ -951,8 +958,7 @@ async function sendPaymentConfirmationEmail(reservation) {
 }
 
 async function sendReservationCancellationEmail(reservation) {
-  console.log(`DEBUG: Rozpoczynam wysyłanie emaila o anulowaniu rezerwacji`);
-  console.log(`DEBUG: Dane rezerwacji:`, reservation);
+  logger.info('Send reservation cancellation email start', { reservation_id: reservation.id });
   try {
     const transactionDate = new Date().toLocaleString('pl-PL');
     const transactionNumber = `TR-${new Date().getFullYear()}-${String(reservation.id).padStart(3, '0')}`;
@@ -1167,9 +1173,9 @@ async function sendAdminCancellationEmail(reservation) {
       html: html
     });
     
-    console.log('📧 Email wysłany - anulowanie przez admina dla:', reservation.email);
+    logger.info('Email sent: admin cancellation', { reservation_id: reservation.id });
   } catch (error) {
-    console.error('Błąd podczas wysyłania emaila o anulowaniu przez admina:', error);
+    logger.error('Email send error: admin cancellation', { message: error.message });
   }
 }
 
@@ -1310,6 +1316,7 @@ async function sendAdminRefundCompletedEmail(reservation) {
 }
 
 const app = express();
+app.use(requestIdMiddleware);
 const PORT = process.env.PORT || 4000;
 
 // Konfiguracja CORS - pozwól na żądania z frontendu (również www i lokalne)
@@ -1381,6 +1388,7 @@ async function checkMaintenanceMode(req, res, next) {
       const maintenanceToken = req.headers['x-maintenance-token'];
       
       if (!maintenanceToken) {
+        logger.info('INFO | MAINTENANCE_TOGGLE', { initiator: 'user', enabled: true, scope: 'all_spots' });
         return res.status(503).json({
           success: false,
           maintenance: true,
@@ -1397,7 +1405,7 @@ async function checkMaintenanceMode(req, res, next) {
       next();
     }
   } catch (error) {
-    console.error('❌ Błąd podczas sprawdzania trybu technicznego:', error);
+    logger.error('Maintenance check error', { message: error.message });
     // W przypadku błędu - pozwól na dostęp (bezpieczniejsze)
     next();
   }
@@ -1407,11 +1415,22 @@ async function checkMaintenanceMode(req, res, next) {
 app.use(checkMaintenanceMode);
 
 // Połączenie z bazą MySQL (lokalna lub Render)
-console.log('🔍 DEBUG - Zmienne środowiskowe:');
-console.log('DB_HOST:', process.env.DB_HOST);
-console.log('DB_USER:', process.env.DB_USER);
-console.log('DB_NAME:', process.env.DB_NAME);
-console.log('NODE_ENV:', process.env.NODE_ENV);
+logger.info('Start serwera', {
+  port: process.env.PORT || 4000,
+  NODE_ENV: process.env.NODE_ENV,
+  P24_SANDBOX: String(process.env.P24_SANDBOX),
+  callbackUrl: `${process.env.BACKEND_URL || 'http://localhost:'+ (process.env.PORT || 4000)}/api/payment/p24/status`
+});
+
+if (!process.env.RESEND_API_KEY) {
+  logger.warn('Brakujące klucze ENV', { missing: ['RESEND_API_KEY'] });
+}
+const missingP24 = ['P24_MERCHANT_ID','P24_POS_ID','P24_API_KEY','P24_CRC','P24_SECRET_ID','P24_REPORT_KEY']
+  .filter(k => !process.env[k]);
+if (missingP24.length) {
+  logger.warn('Brakujące klucze ENV', { missing: missingP24 });
+}
+logger.debug('Parametry środowiska techniczne', { db_tz: '+02:00' });
 
 let pool;
 
@@ -1445,17 +1464,15 @@ pool = createDatabasePool();
 if (pool) {
   pool.getConnection((err, connection) => {
     if (err) {
-      console.error('❌ Błąd połączenia z bazą danych:', err.message);
-      console.error('   Sprawdź zmienne środowiskowe DB_HOST, DB_USER, DB_PASSWORD, DB_NAME');
-      console.error('   Serwer uruchomi się bez bazy danych - niektóre funkcje mogą nie działać');
+      logger.error('DB connection error on startup', { message: err.message, code: err.code });
+      metrics.db.errors++;
     } else {
-      console.log('✅ Połączenie z bazą danych udane');
+      logger.info('DB connection restored after outage');
       connection.release();
     }
   });
 } else {
-  console.error('❌ Nie udało się utworzyć puli połączeń');
-  console.error('   Serwer uruchomi się bez bazy danych - niektóre funkcje mogą nie działać');
+  logger.error('Failed to create DB pool');
 }
 
 // Funkcja pomocnicza do sprawdzania dostępności bazy danych z retry logic
@@ -1470,11 +1487,12 @@ async function checkDatabaseConnection() {
     connection.release();
   return pool;
   } catch (error) {
-    console.error('❌ Błąd połączenia z bazą danych:', error.message);
+    logger.error('DB connection/query error', { error: error.message, code: error.code });
+    metrics.db.errors++;
     
     // Jeśli to błąd ECONNRESET, spróbuj ponownie utworzyć pulę
     if (error.code === 'ECONNRESET' || error.code === 'PROTOCOL_CONNECTION_LOST') {
-      console.log('🔄 Próba ponownego połączenia z bazą danych...');
+      logger.warn('DB temporarily unavailable, reconnecting...');
       pool = createDatabasePool();
       
       if (pool) {
@@ -1493,6 +1511,84 @@ async function checkDatabaseConnection() {
     }
     
     throw error;
+  }
+}
+
+// ===== Metryki i detekcja anomalii blokad =====
+let totalSpotsCount = 0;
+const metrics = {
+  reservations: { created: 0, paid: 0, cancelled: 0 },
+  p24: { errors: 0, verifyFail: 0 },
+  db: { errors: 0 },
+  blocks: { created: 0, deleted: 0, anomalies: 0, singleDayMass: 0, mismatch: 0 }
+};
+
+async function refreshTotalSpotsCount() {
+  try {
+    const dbPool = await checkDatabaseConnection();
+    const [rows] = await dbPool.query('SELECT COUNT(*) as c FROM spots');
+    totalSpotsCount = rows?.[0]?.c || 0;
+  } catch (e) {
+    // ignorujemy – logi DB już to złapią gdzie indziej
+  }
+}
+
+const recentBlockEvents = [];
+function recordBlockEvent(event) {
+  // event: { ts, initiator, reason, spotId, date, op }
+  const ts = Date.now();
+  recentBlockEvents.push({ ts, ...event });
+  // czyść > 5s
+  const cutoff = ts - 5000;
+  while (recentBlockEvents.length && recentBlockEvents[0].ts < cutoff) {
+    recentBlockEvents.shift();
+  }
+}
+
+function checkBlockAnomaly({ initiator, reason, spotsCount, datesCount, affectedRows, sampleSpotIds = [], dates = [] }) {
+  const now = Date.now();
+  const windowMs = 1000;
+  const windowEvents = recentBlockEvents.filter(e => now - e.ts <= windowMs);
+  const uniqueSpots = new Set(windowEvents.map(e => e.spotId).filter(Boolean));
+  const eventAffected = windowEvents.length;
+
+  let anomaly = false;
+  if (uniqueSpots.size > 3) anomaly = true;
+  if (affectedRows > 20) anomaly = true;
+  if (totalSpotsCount && spotsCount === totalSpotsCount) anomaly = true;
+
+  if (anomaly) {
+    metrics.blocks.anomalies++;
+    logger.warn('WARN | BLOCK_ANOMALY', {
+      initiator,
+      reason,
+      sample_spot_ids: sampleSpotIds.slice(0, 5),
+      dates: dates.slice(0, 5),
+      affected_rows: affectedRows,
+      spots_count: spotsCount,
+      unique_spots_in_1s: uniqueSpots.size,
+      events_in_1s: eventAffected
+    });
+  }
+}
+
+function checkSingleDayMass({ date, initiator, reason }) {
+  if (!date || !totalSpotsCount) return;
+  const now = Date.now();
+  const windowMs = 2000;
+  const windowEvents = recentBlockEvents.filter(e => now - e.ts <= windowMs && e.date === date);
+  const uniqueSpots = new Set(windowEvents.map(e => e.spotId).filter(Boolean));
+  const ratio = uniqueSpots.size / totalSpotsCount;
+  if (ratio >= 0.7 && uniqueSpots.size >= 3) {
+    metrics.blocks.singleDayMass++;
+    logger.warn('WARN | BLOCK_SINGLE_DAY_MASS', { date, spots_count: uniqueSpots.size, initiator, reason });
+  }
+}
+
+function checkBlockMismatch({ expected, affected, sqlOp }) {
+  if (expected !== affected) {
+    metrics.blocks.mismatch++;
+    logger.warn('WARN | BLOCK_MISMATCH', { expected_rows: expected, affected_rows: affected, delta: expected - affected, sql_op: sqlOp });
   }
 }
 
@@ -1571,7 +1667,7 @@ app.post('/api/admin/login', async (req, res) => {
       const token = Buffer.from(`${username}:${Date.now()}`).toString('base64');
       
       // Logowanie udanego logowania
-      console.log(`✅ Administrator ${username} zalogował się pomyślnie`);
+      logger.info('Admin login OK', { admin_id: username });
       
       res.json({
         success: true,
@@ -1589,7 +1685,7 @@ app.post('/api/admin/login', async (req, res) => {
       });
     }
   } catch (error) {
-    console.error('❌ Błąd podczas logowania administratora:', error);
+    logger.warn('Admin login failed', { message: error.message });
     res.status(500).json({
       success: false,
       message: 'Błąd serwera podczas logowania'
@@ -1618,7 +1714,7 @@ app.get('/api/admin/verify', verifyAdminToken, async (req, res) => {
 app.post('/api/admin/logout', verifyAdminToken, async (req, res) => {
   try {
     // Logowanie wylogowania
-    console.log(`✅ Administrator ${req.adminUser.username} wylogował się`);
+    logger.info('Admin logout', { admin_id: req.adminUser.username });
     
     // W tym prostym systemie token jest usuwany po stronie frontendu
     // W produkcji można dodać blacklistę tokenów
@@ -2240,6 +2336,8 @@ app.post('/api/reservations', async (req, res) => {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [first_name, last_name, phone, car_plate, email, spot_id, dateFixed, start_time, endDateFixed, final_end_time, status, token, final_amount, regulamin_consent]
     );
+    logger.info('Reservation created', { reservation_id: result.insertId, spot_id: spot_id, start_date: dateFixed, end_date: endDateFixed, amount: final_amount });
+    metrics.reservations.created++;
     
     // Pobierz utworzoną rezerwację do wysłania emaila
     const [newReservation] = await dbPool.query('SELECT * FROM reservations WHERE id = ?', [result.insertId]);
@@ -2279,26 +2377,29 @@ app.post('/api/reservations', async (req, res) => {
     console.log('🔒 Dni do zablokowania:', blockDates);
     
     // Dodaj blokady do bazy danych (tylko dla rezerwacji "oczekująca")
+    req.logger?.info('INFO | BLOCK_RANGE', { start_date: startDateStr, end_date: endDateStr, dates_generated: blockDates.length, first_date: blockDates[0], last_date: blockDates[blockDates.length-1], inclusive_end: false });
+    await refreshTotalSpotsCount();
+    const sampleSpotIds = [spot_id];
     for (const blockDate of blockDates) {
       try {
-        await dbPool.query(
-          'INSERT INTO spot_blocks (spot_id, date, source) VALUES (?, ?, ?)',
-          [spot_id, blockDate, 'reservation']
-        );
-        console.log(`✅ Dodano blokadę: stanowisko ${spot_id}, data ${blockDate}, source: reservation`);
+        const [resIns] = await dbPool.query('INSERT INTO spot_blocks (spot_id, date, source) VALUES (?, ?, ?)', [spot_id, blockDate, 'reservation']);
+        req.logger?.info('INFO | BLOCK_CREATE', { requestId: req.requestId, initiator: 'reservation', source: 'reservation', reservation_id: result.insertId, spot_id: spot_id, date: blockDate });
+        metrics.blocks.created++;
+        recordBlockEvent({ initiator: 'reservation', reason: 'reservation_create', spotId: spot_id, date: blockDate, op: 'insert' });
       } catch (error) {
-        console.error(`❌ Błąd podczas dodawania blokady:`, error);
+        req.logger?.error('ERROR | BLOCK_SQL_ERROR', { initiator: 'reservation', reason: 'reservation_create', sql_op: 'insert', error_code: error.code, message: error.message });
       }
     }
-    
-    console.log(`🔒 Dodano ${blockDates.length} blokad dla rezerwacji ${result.insertId} (dni: ${blockDates.join(', ')})`);
+    req.logger?.info('INFO | BLOCK_BATCH_SUMMARY', { initiator: 'reservation', reason: 'reservation_create', spots_count: 1, dates_count: blockDates.length, affected_rows: blockDates.length });
+    checkBlockAnomaly({ initiator: 'reservation', reason: 'reservation_create', spotsCount: 1, datesCount: blockDates.length, affectedRows: blockDates.length, sampleSpotIds, dates: blockDates });
+    if (blockDates.length) checkSingleDayMass({ date: blockDates[0], initiator: 'reservation', reason: 'reservation_create' });
     
     // Wyślij email z potwierdzeniem rezerwacji
     await sendReservationEmail(newReservation[0]);
     
     res.json({ id: result.insertId, token, status, amount: final_amount });
   } catch (err) {
-    console.error('❌ Błąd przy dodawaniu rezerwacji:', err);
+    logger.error('Reservation create error', { message: err.message });
     res.status(500).json({ error: err.message });
   }
 });
@@ -2308,13 +2409,13 @@ app.post('/api/reservations', async (req, res) => {
 app.get('/api/spots/:id/blocks', async (req, res) => {
   const spotId = req.params.id;
   try {
-    console.log('DEBUG: Pobieranie blokad dla stanowiska:', spotId);
+    req.logger?.debug('Get spot blocks', { spotId });
     const dbPool = await checkDatabaseConnection();
     const [blocks] = await dbPool.query('SELECT date FROM spot_blocks WHERE spot_id = ?', [spotId]);
-    console.log('DEBUG: Znalezione blokady (wszystkie source):', blocks);
+    req.logger?.debug('Found spot blocks', { count: blocks.length });
     res.json(blocks);
   } catch (err) {
-    console.error('DEBUG: Błąd podczas pobierania blokad:', err);
+    req.logger?.error('DB error while fetching spot blocks', { message: err.message });
     res.status(500).json({ error: err.message });
   }
 });
@@ -2326,13 +2427,18 @@ app.post('/api/spots/:id/blocks', verifyAdminToken, async (req, res) => {
     return res.status(400).json({ error: 'Brak wymaganych danych.' });
   }
   try {
-    console.log('DEBUG: Dodawanie blokady - stanowisko:', spotId, 'data:', date);
+    req.logger?.info('INFO | BLOCK_CREATE', { requestId: req.requestId, initiator: 'admin', source: 'manual', reservation_id: null, spot_id: spotId, date, count_in_batch: 1 });
     const dbPool = await checkDatabaseConnection();
-    await dbPool.query('INSERT INTO spot_blocks (spot_id, date, source) VALUES (?, ?, ?)', [spotId, date, 'admin']);
-    console.log('DEBUG: Blokada dodana pomyślnie');
+    await refreshTotalSpotsCount();
+    const [resIns] = await dbPool.query('INSERT INTO spot_blocks (spot_id, date, source) VALUES (?, ?, ?)', [spotId, date, 'admin']);
+    metrics.blocks.created++;
+    recordBlockEvent({ initiator: 'admin', reason: 'manual', spotId: parseInt(spotId, 10), date, op: 'insert' });
+    req.logger?.info('INFO | BLOCK_BATCH_SUMMARY', { initiator: 'admin', reason: 'manual', spots_count: 1, dates_count: 1, affected_rows: 1 });
+    checkBlockAnomaly({ initiator: 'admin', reason: 'manual', spotsCount: 1, datesCount: 1, affectedRows: 1, sampleSpotIds: [parseInt(spotId, 10)], dates: [date] });
+    checkSingleDayMass({ date, initiator: 'admin', reason: 'manual' });
     res.json({ success: true });
   } catch (err) {
-    console.error('DEBUG: Błąd podczas dodawania blokady:', err);
+    req.logger?.error('ERROR | BLOCK_SQL_ERROR', { initiator: 'admin', reason: 'manual', sql_op: 'insert', error_code: err.code, message: err.message });
     res.status(500).json({ error: err.message });
   }
 });
@@ -2344,13 +2450,17 @@ app.delete('/api/spots/:id/blocks', verifyAdminToken, async (req, res) => {
     return res.status(400).json({ error: 'Brak wymaganych danych.' });
   }
   try {
-    console.log('DEBUG: Usuwanie blokady - stanowisko:', spotId, 'data:', date);
+    req.logger?.info('INFO | BLOCK_CREATE', { requestId: req.requestId, initiator: 'admin', source: 'manual', reservation_id: null, spot_id: spotId, date, count_in_batch: 1 });
     const dbPool = await checkDatabaseConnection();
+    await refreshTotalSpotsCount();
     const [result] = await dbPool.query('DELETE FROM spot_blocks WHERE spot_id = ? AND date = ?', [spotId, date]);
-    console.log('DEBUG: Usunięto blokad (wszystkie source):', result.affectedRows);
+    metrics.blocks.deleted += result.affectedRows;
+    recordBlockEvent({ initiator: 'admin', reason: 'manual', spotId: parseInt(spotId, 10), date, op: 'delete' });
+    req.logger?.info('INFO | BLOCK_BATCH_SUMMARY', { initiator: 'admin', reason: 'manual', spots_count: 1, dates_count: 1, affected_rows: result.affectedRows });
+    checkBlockAnomaly({ initiator: 'admin', reason: 'manual', spotsCount: 1, datesCount: 1, affectedRows: result.affectedRows, sampleSpotIds: [parseInt(spotId, 10)], dates: [date] });
     res.json({ success: true });
   } catch (err) {
-    console.error('DEBUG: Błąd podczas usuwania blokady:', err);
+    req.logger?.error('ERROR | BLOCK_SQL_ERROR', { initiator: 'admin', reason: 'manual', sql_op: 'delete', error_code: err.code, message: err.message });
     res.status(500).json({ error: err.message });
   }
 });
@@ -2613,17 +2723,19 @@ app.get('/api/check-db-structure', async (req, res) => {
 app.delete('/api/spot-blocks/clear-all', verifyAdminToken, async (req, res) => {
   try {
     const dbPool = await checkDatabaseConnection();
+    await refreshTotalSpotsCount();
     
     // Usuń wszystkie blokady (bez rozróżniania source)
     const [result] = await dbPool.query('DELETE FROM spot_blocks');
-    console.log(`🗑️ Usunięto wszystkie blokady (${result.affectedRows} rekordów)`);
+    metrics.blocks.deleted += result.affectedRows;
+    logger.warn('WARN | BLOCK_ANOMALY', { initiator: 'admin', reason: 'clear_all', affected_rows: result.affectedRows, spots_count: totalSpotsCount });
     res.json({ 
       success: true, 
       message: `Usunięto ${result.affectedRows} blokad`,
       deletedCount: result.affectedRows 
     });
   } catch (error) {
-    console.error('❌ Błąd podczas usuwania blokad:', error);
+    logger.error('ERROR | BLOCK_SQL_ERROR', { initiator: 'admin', reason: 'clear_all', sql_op: 'delete_all', message: error.message });
     res.status(500).json({ error: error.message });
   }
 });
@@ -3597,52 +3709,34 @@ app.post('/api/reservations/:id/payment', async (req, res) => {
 // POST /api/payment/p24/status – callback z Przelewy24
 app.post('/api/payment/p24/status', async (req, res) => {
   const notification = req.body;
-  
-  console.log('🔔 CALLBACK - Otrzymano notyfikację z Przelewy24');
-  console.log('📦 CALLBACK - Dane notyfikacji:', {
-    sessionId: notification.sessionId,
-    orderId: notification.orderId,
-    amount: notification.amount,
-    currency: notification.currency,
-    status: notification.status,
-    sign: notification.sign ? '***' : 'brak'
-  });
+  logger.info('P24 callback received', { sessionId: notification.sessionId, statusP24: notification.status, orderId: notification.orderId });
   
   try {
     const dbPool = await checkDatabaseConnection();
     
     // 1. Znajdź rezerwację na podstawie sessionId
-    console.log('🔍 CALLBACK - Szukam rezerwacji dla sessionId:', notification.sessionId);
+    logger.debug('P24 callback: find reservation by sessionId', { sessionId: notification.sessionId });
     const [reservations] = await dbPool.query('SELECT * FROM reservations WHERE payment_id = ?', [notification.sessionId]);
     
     if (!reservations || reservations.length === 0) {
-      console.error('❌ CALLBACK - Nie znaleziono rezerwacji dla sessionId:', notification.sessionId);
+      logger.error('P24 callback: reservation not found', { sessionId: notification.sessionId });
       return res.status(404).send('Reservation not found');
     }
 
     const reservation = reservations[0];
-    console.log('📦 CALLBACK - Znaleziono rezerwację:', {
-      id: reservation.id,
-      status: reservation.status,
-      amount: reservation.amount,
-      payment_id: reservation.payment_id,
-      p24_token: reservation.p24_token
-    });
+    logger.debug('P24 callback: reservation found', { reservation_id: reservation.id, status: reservation.status });
 
     // 2. Sprawdź czy kwota się zgadza
     const expectedAmount = Math.round(reservation.amount * 100);
-    console.log('💰 CALLBACK - Sprawdzam kwotę');
-    console.log('   Otrzymana kwota:', notification.amount);
-    console.log('   Oczekiwana kwota:', expectedAmount);
-    console.log('   Kwoty się zgadzają:', parseInt(notification.amount) === expectedAmount);
+    logger.info('P24 callback amount check', { sessionId: notification.sessionId, expected: expectedAmount, received: parseInt(notification.amount) });
     
     if (parseInt(notification.amount) !== expectedAmount) {
-      console.error('❌ CALLBACK - Nieprawidłowa kwota płatności:', notification.amount, 'oczekiwana:', expectedAmount);
+      logger.warn('P24 amount mismatch', { expected: expectedAmount, received: parseInt(notification.amount), orderId: notification.orderId });
       return res.status(400).send('Invalid amount');
     }
 
     // 3. KLUCZOWE: Wykonaj weryfikację transakcji w P24
-    console.log('🔐 CALLBACK - Wykonuję weryfikację transakcji...');
+    logger.info('P24 callback: verify start', { sessionId: notification.sessionId, orderId: notification.orderId });
     const verificationResult = await verifyTransaction(
       notification.sessionId,
       notification.orderId,
@@ -3650,11 +3744,12 @@ app.post('/api/payment/p24/status', async (req, res) => {
       notification.currency
     );
 
-    console.log('📋 CALLBACK - Wynik weryfikacji:', verificationResult);
+    logger.debug('P24 callback: verify result', { sessionId: notification.sessionId, status: verificationResult?.data?.status });
 
     if (verificationResult.data && verificationResult.data.status === 'success') {
       // 4. Aktualizuj status TYLKO po udanej weryfikacji
-      console.log('💾 CALLBACK - Aktualizuję status na opłacona');
+      logger.info('Reservation paid via callback', { reservation_id: reservation.id, orderId: notification.orderId });
+      metrics.reservations.paid++;
       await dbPool.query(
         'UPDATE reservations SET status = ?, updated_at = NOW() WHERE payment_id = ?',
         ['opłacona', notification.sessionId]
@@ -3676,6 +3771,7 @@ app.post('/api/payment/p24/status', async (req, res) => {
     }
     
     // Usuń stare blokady z source 'reservation' i dodaj nowe z source 'paid_reservation'
+    await refreshTotalSpotsCount();
     for (const blockDate of blockDates) {
       try {
         // Usuń starą blokadę
@@ -3683,33 +3779,39 @@ app.post('/api/payment/p24/status', async (req, res) => {
           'DELETE FROM spot_blocks WHERE spot_id = ? AND date = ? AND source = ?',
             [reservation.spot_id, blockDate, 'reservation']
         );
+        metrics.blocks.deleted++;
+        recordBlockEvent({ initiator: 'callback', reason: 'payment_verified', spotId: reservation.spot_id, date: blockDate, op: 'delete' });
         
         // Dodaj nową blokadę z source 'paid_reservation'
         await dbPool.query(
           'INSERT INTO spot_blocks (spot_id, date, source) VALUES (?, ?, ?)',
             [reservation.spot_id, blockDate, 'paid_reservation']
         );
+        metrics.blocks.created++;
+        recordBlockEvent({ initiator: 'callback', reason: 'payment_verified', spotId: reservation.spot_id, date: blockDate, op: 'insert' });
         
-          console.log(`✅ CALLBACK - Zmieniono source blokady: stanowisko ${reservation.spot_id}, data ${blockDate}, source: paid_reservation`);
+          logger.info('INFO | BLOCK_STATUS_CHANGE', { reservation_id: reservation.id, spot_id: reservation.spot_id, dates_changed: 1, deleted_reservation_blocks: 1, inserted_paid_blocks: 1 });
       } catch (error) {
-          console.error(`❌ CALLBACK - Błąd podczas zmiany source blokady:`, error);
+          logger.error('ERROR | BLOCK_SQL_ERROR', { initiator: 'callback', reason: 'payment_verified', sql_op: 'delete/insert', error_code: error.code, message: error.message });
       }
     }
     
-      console.log(`✅ CALLBACK - Zmieniono source ${blockDates.length} blokad dla rezerwacji ${reservation.id} na 'paid_reservation'`);
+      logger.info('INFO | BLOCK_BATCH_SUMMARY', { initiator: 'callback', reason: 'payment_verified', spots_count: 1, dates_count: blockDates.length, affected_rows: blockDates.length });
+      checkBlockAnomaly({ initiator: 'callback', reason: 'payment_verified', spotsCount: 1, datesCount: blockDates.length, affectedRows: blockDates.length, sampleSpotIds: [reservation.spot_id], dates: blockDates });
     
     // Wyślij email z potwierdzeniem
       await sendPaymentConfirmationEmail(reservation);
       
-      console.log('✅ CALLBACK - Płatność potwierdzona i zweryfikowana dla sessionId:', notification.sessionId);
+      logger.info('P24 callback processed OK', { sessionId: notification.sessionId });
       res.status(200).send('OK');
     } else {
-      console.error('❌ CALLBACK - Weryfikacja transakcji nie powiodła się:', verificationResult);
+      logger.error('P24 verify failed', { sessionId: notification.sessionId, orderId: notification.orderId });
+      metrics.p24.verifyFail++;
       res.status(400).send('Verification failed');
     }
     
   } catch (error) {
-    console.error('❌ CALLBACK - Błąd przetwarzania notyfikacji:', error);
+    logger.error('P24 callback handler error', { message: error.message });
     res.status(500).send('Internal error');
   }
 });
@@ -3816,17 +3918,17 @@ app.delete('/api/reservations/:id', verifyAdminToken, async (req, res) => {
           'DELETE FROM spot_blocks WHERE spot_id = ? AND date = ? AND source IN (?, ?)',
           [resv.spot_id, blockDate, 'reservation', 'paid_reservation']
         );
-        console.log(`🔓 Usunięto blokadę rezerwacji: stanowisko ${resv.spot_id}, data ${blockDate}`);
+        logger.info('INFO | BLOCK_STATUS_CHANGE', { reservation_id: resv.id, spot_id: resv.spot_id, dates_changed: 1, deleted_reservation_blocks: 1, inserted_paid_blocks: 0 });
       } catch (error) {
-        console.error(`❌ Błąd podczas usuwania blokady:`, error);
+        logger.error('ERROR | BLOCK_SQL_ERROR', { initiator: 'admin', reason: 'manual_cancel', sql_op: 'delete', error_code: error.code, message: error.message });
       }
     }
-    
-    console.log(`🔓 Usunięto ${blockDates.length} blokad dla rezerwacji ${resv.id} (dni: ${blockDates.join(', ')})`);
+    logger.info('INFO | BLOCK_BATCH_SUMMARY', { initiator: 'admin', reason: 'manual_cancel', spots_count: 1, dates_count: blockDates.length, affected_rows: blockDates.length });
     
     // Usuń rezerwację
     await dbPool.query('DELETE FROM reservations WHERE id = ?', [id]);
-    console.log(`🗑️ Usunięto rezerwację ${id}`);
+    logger.info('Reservation cancelled', { reservation_id: id });
+    metrics.reservations.cancelled++;
     
     res.json({ success: true });
   } catch (err) {
@@ -3857,10 +3959,12 @@ app.get('/', (req, res) => {
 
 // Global error handler
 app.use((err, req, res, next) => {
-  console.error('❌ Global error handler:', err);
+  const requestId = req?.requestId;
+  logger.error('HTTP 500', { method: req.method, path: req.path, requestId, message: err.message });
   res.status(500).json({ 
     error: 'Internal Server Error',
     message: process.env.NODE_ENV === 'production' ? 'Something went wrong' : err.message,
+    requestId,
     timestamp: new Date().toISOString()
   });
 });
@@ -4247,8 +4351,7 @@ app.use('*', (req, res) => {
 });
 
 app.listen(PORT, '0.0.0.0', async () => {
-  console.log(`API działa na http://0.0.0.0:${PORT}`);
-  console.log(`Callback URL: https://fishing-api-backend.onrender.com/api/payment/p24/status`);
+  logger.info('Serwer wystartował', { port: PORT, callbackUrl: `${DOMAIN_CONFIG.backend}/api/payment/p24/status` });
   
   // Test połączenia z bazą i sprawdzenie timezone
   if (pool) {
@@ -4267,12 +4370,48 @@ app.listen(PORT, '0.0.0.0', async () => {
   }
   
   // Uruchom timer do sprawdzania statusów rezerwacji co 1 sekundę dla lepszej synchronizacji
-  setInterval(checkAndUpdateReservationStatuses, 1000); // 1000ms = 1 sekunda
-  console.log('⏰ Timer statusów rezerwacji uruchomiony (sprawdzanie co 1 sekundę)');
-  console.log('🔧 DEBUG - Timer główny będzie sprawdzał rezerwacje co 1 sekundę');
-  console.log('📋 NOWE CZASY: oczekująca=15min, platnosc_w_toku=5min30s, P24=5min');
+  setInterval(() => {
+    const scheduledAt = Date.now();
+    const start = Date.now();
+    checkAndUpdateReservationStatuses().catch(err => logger.error('Timer exception', { timer_name: 'checkAndUpdateReservationStatuses', message: err.message }));
+    const duration = Date.now() - start;
+    if (duration > 2000) {
+      logger.warn('WARN | BLOCK_TIMER_DRIFT', { timer_name: 'checkAndUpdateReservationStatuses', scheduled_at: scheduledAt, started_at: start, duration_ms: duration });
+    }
+  }, 1000);
+  logger.info('Timer statusów rezerwacji uruchomiony', { interval_ms: 1000 });
   
   // Uruchom timer do sprawdzania płatności co 5 sekund
-  setInterval(checkPaymentStatuses, 5000); // 5000ms = 5 sekund
-  console.log('Timer płatności uruchomiony (sprawdzanie co 5 sekund)');
+  setInterval(() => {
+    const scheduledAt = Date.now();
+    const start = Date.now();
+    checkPaymentStatuses().catch(err => logger.error('Timer exception', { timer_name: 'checkPaymentStatuses', message: err.message }));
+    const duration = Date.now() - start;
+    if (duration > 10000) {
+      logger.warn('WARN | BLOCK_TIMER_DRIFT', { timer_name: 'checkPaymentStatuses', scheduled_at: scheduledAt, started_at: start, duration_ms: duration });
+    }
+  }, 5000);
+  logger.info('Timer płatności uruchomiony', { interval_ms: 5000 });
+
+  // Podsumowania co 30 minut
+  setInterval(() => {
+    logger.info('SUMMARY 30m', {
+      reservations_created: metrics.reservations.created,
+      reservations_paid: metrics.reservations.paid,
+      reservations_cancelled: metrics.reservations.cancelled,
+      p24_errors: metrics.p24.errors,
+      p24_verify_fail: metrics.p24.verifyFail,
+      db_errors: metrics.db.errors,
+      blocks_created: metrics.blocks.created,
+      blocks_deleted: metrics.blocks.deleted,
+      blocks_anomalies: metrics.blocks.anomalies,
+      blocks_single_day_mass: metrics.blocks.singleDayMass,
+      blocks_mismatch: metrics.blocks.mismatch
+    });
+    // reset liczników
+    metrics.reservations = { created: 0, paid: 0, cancelled: 0 };
+    metrics.p24 = { errors: 0, verifyFail: 0 };
+    metrics.db = { errors: 0 };
+    metrics.blocks = { created: 0, deleted: 0, anomalies: 0, singleDayMass: 0, mismatch: 0 };
+  }, 30 * 60 * 1000);
 });
