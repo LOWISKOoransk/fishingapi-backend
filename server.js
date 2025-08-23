@@ -1317,6 +1317,7 @@ async function sendAdminRefundCompletedEmail(reservation) {
 }
 
 const app = express();
+app.set('trust proxy', 1);
 app.use(requestIdMiddleware);
 const PORT = process.env.PORT || 4000;
 
@@ -1326,6 +1327,7 @@ const cookieOptions = () => ({
   httpOnly: true,
   secure: isProd,
   sameSite: isProd ? 'none' : 'lax',
+  ...(isProd ? { partitioned: true } : {}),
   path: '/',
   maxAge: 24 * 60 * 60 * 1000
 });
@@ -1333,6 +1335,7 @@ const cookieOptionsForClear = () => ({
   httpOnly: true,
   secure: isProd,
   sameSite: isProd ? 'none' : 'lax',
+  ...(isProd ? { partitioned: true } : {}),
   path: '/'
 });
 
@@ -1349,7 +1352,7 @@ const allowedOrigins = [
   'http://localhost:4000',
 ];
 
-app.use(cors({
+const corsOptions = {
   origin: (origin, callback) => {
     if (!origin) return callback(null, true); // pozwól na brak origin (np. mobilne webview)
     if (allowedOrigins.includes(origin)) return callback(null, true);
@@ -1360,10 +1363,12 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Origin', 'Accept'],
   optionsSuccessStatus: 200
-}));
+};
 
-// Dodaj middleware do obsługi preflight requests
-app.options('*', cors());
+app.use(cors(corsOptions));
+
+// Dodaj middleware do obsługi preflight requests z tymi samymi opcjami
+app.options('*', cors(corsOptions));
 
 // Dodaj middleware do logowania żądań (debug dla Render)
 app.use((req, res, next) => {
